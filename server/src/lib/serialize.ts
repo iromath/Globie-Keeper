@@ -205,11 +205,12 @@ export type ShareRow = {
   status: string;
   due_at: Date | null;
   paid_at: Date | null;
+  created_at: Date;
   paypal_order_id?: string | null;
   paypal_approve_url?: string | null;
 };
 
-export function mapShare(row: ShareRow) {
+export function mapShare(row: ShareRow, canFinish = false) {
   return {
     id: row.id,
     billId: row.bill_id,
@@ -231,6 +232,8 @@ export function mapShare(row: ShareRow) {
     paidAt: row.paid_at ? iso(row.paid_at) : null,
     paypalOrderId: row.paypal_order_id ?? null,
     approveUrl: row.paypal_approve_url ?? null,
+    /** PayPal holds an approval we can still capture; only on a `requested` share. */
+    canFinish,
   };
 }
 

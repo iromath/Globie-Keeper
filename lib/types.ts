@@ -98,6 +98,8 @@ export type Share = {
   paypalOrderId?: string | null;
   /** Browser approval link; the member resumes checkout from here. */
   approveUrl?: string | null;
+  /** PayPal holds an approval we can still capture; only on a `requested` share. */
+  canFinish?: boolean;
 };
 
 /**

@@ -4,6 +4,7 @@
  * share. Keeping them here means the agent cannot drift from the routes.
  */
 
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -80,7 +81,7 @@ export async function loadShares(billId: string): Promise<ShareRow[]> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url
+            s.paypal_order_id, s.paypal_approve_url, s.created_at
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -99,7 +100,7 @@ export async function loadShareById(shareId: string): Promise<ShareRow> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url
+            s.paypal_order_id, s.paypal_approve_url, s.created_at
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -361,6 +362,12 @@ export async function requestPaymentForShare(input: {
     currency: input.currency,
     description: `Globie Keeper — ${share.member_name} · ${input.merchant ?? 'group bill'}`,
     payee: { email: payeeEmail },
+    // PayPal replays the original response for a reused request id — including
+    // an order the payer already refused — so a re-request after a dead
+    // checkout needs a key of its own.
+    requestId: share.paypal_order_id
+      ? `globie-share-${share.id}-${randomUUID()}`
+      : undefined,
   });
 
   await withTransaction(async (tx) => {

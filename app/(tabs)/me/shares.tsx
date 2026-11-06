@@ -40,14 +40,16 @@ export default function MySharesScreen() {
    * the API captures the order, so the share settles even if the webhook is slow.
    */
   async function pay(share: Share) {
-    if (!share.approveUrl) return;
+    if (!share.approveUrl && !share.canFinish) return;
     setPaying(share.id);
     setError(null);
     setNotice(null);
-    try {
-      await WebBrowser.openBrowserAsync(share.approveUrl);
-    } catch {
-      // A dismissed browser is not a failure; the capture decides below.
+    if (share.approveUrl) {
+      try {
+        await WebBrowser.openBrowserAsync(share.approveUrl);
+      } catch {
+        // A dismissed browser is not a failure; the capture decides below.
+      }
     }
     try {
       const result = await capture.mutateAsync({ shareId: share.id });
@@ -168,7 +170,9 @@ export default function MySharesScreen() {
               key={share.id}
               share={share}
               paying={paying === share.id}
-              onPay={share.approveUrl ? () => pay(share) : undefined}
+              onPay={
+                share.approveUrl || share.canFinish ? () => pay(share) : undefined
+              }
               onPress={() => router.push({ pathname: '/groups/[id]', params: { id: share.groupId } })}
             />
           ))}

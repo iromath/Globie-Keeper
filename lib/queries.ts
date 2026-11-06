@@ -373,6 +373,9 @@ export function useCaptureShare() {
       client.invalidateQueries({ queryKey: ['group'] });
       client.invalidateQueries({ queryKey: ['timeline'] });
     },
+    // A checkout PayPal refused leaves the share `failed` server-side; refetching
+    // replaces the dead "Payment requested" row with the truth.
+    onError: () => client.invalidateQueries({ queryKey: queryKeys.myShares }),
   });
 }
 

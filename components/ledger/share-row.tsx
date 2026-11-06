@@ -14,7 +14,7 @@ const statusCopy: Record<Share['status'], string> = {
   paid: 'Paid',
   settled: 'Settled',
   disputed: 'Disputed',
-  failed: 'Failed',
+  failed: 'Didn\u2019t go through, nothing was charged',
   refunded: 'Refunded',
 };
 
@@ -72,7 +72,9 @@ export function ShareRow({
         {onPress ? <Icon name={icon.chevronRight} size={15} color={colors.mutedDim} /> : null}
       </View>
       <Text variant="caption" tone={tone}>
-        {statusCopy[share.status]}
+        {share.status === 'requested' && share.canFinish
+          ? 'Approved — finish the payment'
+          : statusCopy[share.status]}
         {share.dueAt ? `, due ${new Date(share.dueAt).toLocaleDateString()}` : ''}
       </Text>
     </View>
@@ -115,7 +117,7 @@ export function ShareRow({
       </View>
       {onPay ? (
         <Button
-          title="Pay"
+          title={share.canFinish ? 'Finish payment' : 'Pay'}
           compact
           icon={icon.card}
           loading={paying}

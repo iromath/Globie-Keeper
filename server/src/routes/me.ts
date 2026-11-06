@@ -4,6 +4,7 @@ import { query } from '../db/pool.js';
 import { ApiError } from '../lib/http-error.js';
 import { channelEnabled, FALLBACK_ORDER, type Channel } from '../lib/notify.js';
 import { mapSettledRate, mapShare, type ShareRow } from '../lib/serialize.js';
+import { reconcileShare } from '../lib/settlement.js';
 import { asRecord, currencyCode, optionalEmail, requiredString } from '../lib/validate.js';
 import { requireUser } from '../plugins/auth.js';
 
@@ -162,7 +163,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
     const { rows } = await query<ShareRow>(
       `select s.id, s.bill_id, b.agreement_id, a.group_id, g.name as group_name,
               s.member_id, u.display_name as member_name, s.amount, s.currency,
-              s.status, s.due_at, s.paid_at,
+              s.status, s.due_at, s.paid_at, s.created_at,
               s.paypal_order_id, s.paypal_approve_url
          from shares s
          join bills b on b.id = s.bill_id
@@ -177,7 +178,15 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       [auth.userId],
     );
 
-    const shares = rows.map(mapShare);
+    // These are the caller's own shares, so every `requested` row is a checkout
+    // they opened. Re-read those orders: a refusal at PayPal's page never comes
+    // back to us, and the row would otherwise say "Payment requested" forever.
+    const shares = await Promise.all(
+      rows.map(async (row) => {
+        const state = await reconcileShare(row);
+        return mapShare({ ...row, status: state.status }, state.canFinish);
+      }),
+    );
     const outstandingMinor = shares.reduce((sum, share) => sum + share.amountMinor, 0);
     const currency = shares.length > 0 ? shares[0]!.currency : await fallbackCurrency(auth.userId);
 

@@ -12,6 +12,8 @@ type OrderResponse = {
   id: string;
   status: string;
   links?: PayPalLink[];
+  /** ISO timestamp of when PayPal opened the checkout. */
+  create_time?: string;
 };
 
 type TokenResponse = {
@@ -264,9 +266,13 @@ async function getOrder(orderId: string): Promise<CaptureResponse> {
  */
 export async function readOrder(
   orderId: string,
-): Promise<{ status: string; captureId: string | null }> {
+): Promise<{ status: string; captureId: string | null; createTime: string | null }> {
   const order = await getOrder(orderId);
-  return { status: order.status, captureId: firstCapture(order)?.captureId ?? null };
+  return {
+    status: order.status,
+    captureId: firstCapture(order)?.captureId ?? null,
+    createTime: order.create_time ?? null,
+  };
 }
 
 /**

@@ -596,7 +596,7 @@ const getBillStatus: ToolHandler = async (request, args) => {
     result: {
       bill_id: billId,
       status: bill.status,
-      shares: shares.map(mapShare),
+      shares: shares.map((share) => mapShare(share)),
       totals: billTotals(bill),
       outstanding: {
         count: outstanding.length,

@@ -31,6 +31,7 @@ import {
     type AllocationRow,
     type BillRow,
 } from '../lib/serialize.js';
+import { reconcileShare } from '../lib/settlement.js';
 import { asRecord, currencyCode, pathUuid, requiredUuid } from '../lib/validate.js';
 
 type BillParams = { Params: { id: string } };
@@ -237,7 +238,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<BillParams>('/bills/:id', async (request) => {
     const billId = pathUuid(request.params.id);
-    await requireBillMember(request, billId);
+    const ctx = await requireBillMember(request, billId);
 
     const [bill, allocations, shares] = await Promise.all([
       loadBill(billId),
@@ -245,10 +246,19 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       loadShares(billId),
     ]);
 
+    // A checkout PayPal refused never returns to us, so a `requested` share can
+    // be dead. Re-read only the caller's own order before rendering it.
+    const mine = shares.find((share) => share.member_id === ctx.member.id);
+    const reconciled = mine ? await reconcileShare(mine) : null;
+
     return {
       bill: mapBill(bill.bill, bill.items),
       allocations: allocations.map(mapAllocation),
-      shares: shares.map(mapShare),
+      shares: shares.map((share) =>
+        share === mine && reconciled
+          ? mapShare({ ...share, status: reconciled.status }, reconciled.canFinish)
+          : mapShare(share),
+      ),
     };
   });
 
@@ -454,7 +464,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       const shares = await loadShares(billId);
       return {
         bill: mapBill(current.bill, current.items),
-        shares: shares.map(mapShare),
+        shares: shares.map((share) => mapShare(share)),
       };
     }
     if (LOCKED.has(current.bill.status)) {
@@ -558,7 +568,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       bill: mapBill(bill.bill, bill.items),
-      shares: shares.map(mapShare),
+      shares: shares.map((share) => mapShare(share)),
     };
   });
 

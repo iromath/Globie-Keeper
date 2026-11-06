@@ -10,6 +10,7 @@ import { withTransaction } from '../db/pool.js';
 import { extractSettledRate, type SettledRate } from './fx.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
+import { isPayPalConfigured, readOrder } from './paypal.js';
 
 /** First reimburser in an agreement earns the most (DEV_PLAN §2.12). */
 const GLOBIE_BY_RANK = [10, 5, 3];
@@ -345,7 +346,12 @@ export async function failShare(input: {
     const share = await loadShare(tx, input.shareId, true);
     if (['paid', 'settled', 'refunded'].includes(share.status)) return;
 
-    await tx.query(`update shares set status = 'failed' where id = $1`, [share.id]);
+    // The approval link died with the order; leaving it behind would keep a
+    // "Pay" button that reopens a checkout PayPal already refused.
+    await tx.query(
+      `update shares set status = 'failed', paypal_approve_url = null where id = $1`,
+      [share.id],
+    );
     await tx.query(
       `update payments set status = 'failed' where share_id = $1 and status = 'pending'`,
       [share.id],
@@ -365,6 +371,59 @@ export async function failShare(input: {
         `PayPal declined the payment from ${share.member_name} — the share can be re-requested`,
     });
   });
+}
+
+/**
+ * How long an unapproved PayPal checkout may sit before it counts as dead. The
+ * browser is the only place a checkout can be approved, so a share that is
+ * still unapproved this long after its order was opened was abandoned or
+ * refused; waiting longer just leaves the row saying "Payment requested".
+ * The clock is the order's own `create_time`, not the share's — a share is
+ * written at finalize, long before the fronter requests payment.
+ */
+const CHECKOUT_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * A checkout PayPal refuses at its own page never comes back to us: PayPal
+ * shows a generic error instead of the return (or cancel) URL, so no capture
+ * runs and no webhook fires. The share would sit in `requested` forever and
+ * every screen would keep saying "Payment requested". Re-read the order when
+ * the owing member loads their shares, close the dead checkouts and report
+ * whether PayPal holds an approval we can still capture.
+ */
+export async function reconcileShare(share: {
+  id: string;
+  status: string;
+  paypal_order_id?: string | null;
+}): Promise<{ status: string; canFinish: boolean }> {
+  if (
+    share.status !== 'requested' ||
+    !share.paypal_order_id ||
+    !isPayPalConfigured()
+  ) {
+    return { status: share.status, canFinish: false };
+  }
+
+  const order = await readOrder(share.paypal_order_id).catch(() => null);
+  if (!order) return { status: share.status, canFinish: false };
+
+  if (order.status === 'APPROVED' || order.status === 'COMPLETED') {
+    return { status: share.status, canFinish: true };
+  }
+
+  const stale =
+    order.createTime !== null &&
+    Date.now() - new Date(order.createTime).getTime() > CHECKOUT_TTL_MS;
+  if (order.status === 'VOIDED' || stale) {
+    await failShare({
+      shareId: share.id,
+      actor: 'PayPal',
+      reason: 'The PayPal checkout was not completed — the fronter can request it again',
+    });
+    return { status: 'failed', canFinish: false };
+  }
+
+  return { status: share.status, canFinish: false };
 }
 
 /** A refund reverses the reimbursement and the Globie it earned. */
