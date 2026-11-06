@@ -6,9 +6,10 @@ import { useActivitySeenAt } from '@/lib/activity-seen';
 import { useMyActivity } from '@/lib/queries';
 
 /**
- * The three places a member lives. Everything else — a group, a bill, the Hero
- * board — is pushed on top of these, which is why this layout owns the bar and
- * the root stack screens do not.
+ * The four places a member lives. Everything else — a bill, the Hero board —
+ * is pushed on top of these, which is why this layout owns the bar and the
+ * root stack screens do not. Groups earns a destination of its own: it is the
+ * only stable way back into a table after the app is reopened.
  */
 export default function TabsLayout() {
   return (
@@ -17,6 +18,7 @@ export default function TabsLayout() {
       screenOptions={{ headerShown: false, animation: 'shift', lazy: false }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="groups" options={{ title: 'Groups' }} />
       <Tabs.Screen name="me/shares" options={{ title: 'Shares' }} />
       <Tabs.Screen name="me/activity" options={{ title: 'Activity' }} />
     </Tabs>

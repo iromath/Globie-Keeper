@@ -409,6 +409,7 @@ POST   /api/auth/paypal/handoff
 
 POST   /api/groups
 POST   /api/groups/:id/members
+GET    /api/groups                          the caller's memberships
 GET    /api/groups/:id
 
 POST   /api/agreements
@@ -1067,11 +1068,11 @@ Typecheck (`tsc --noEmit`) and production build (`tsc`) are clean.
 ### 11.2 Known gaps in the demo path
 
 - **Receipt AI is inactive without `VISION_API_KEY`.** `lib/receipt.ts` refuses to invent data: the bill returns to `UPLOADED` with the warning *"Receipt AI could not read this upload"*, and the UI shows `bill.warnings` so the demo degrades to manual entry instead of lying.
-- **The buyer side of a live capture is unverified.** Sandbox credentials are present, so orders are created for real (§11.1), but this machine has no sandbox *buyer* account: nobody can approve the order, and approving is what turns `PAYER_ACTION_REQUIRED` into a capture. Capturing before approval is refused as `502 paypal_capture_failed (422 ORDER_NOT_APPROVED)`, which is the correct behaviour. `PAYPAL_WEBHOOK_ID` is still blank, so the webhook stays unsigned in development. A live end-to-end run needs a sandbox personal account to log in with.
+- **The buyer side has accounts but no finished run.** Orders are created for real (§11.1), and approving is what turns `PAYER_ACTION_REQUIRED` into a capture. Two sandbox personal accounts now exist in the developer dashboard — `globie.fronter@personal.example.com` (THB 0, the payee) and `globie.member@personal.example.com` (THB 1,000, the payer); credentials are in the dashboard, not in this repo. On the deployed `keeper-db` the Volunteer Dinner fronter already carries `members.paypal_email = globie.fronter@personal.example.com`, so new reimbursement orders resolve a payee instead of returning `409 fronter_paypal_missing`. `PAYPAL_WEBHOOK_ID` is still blank, so the webhook stays unsigned in development.
 - **Webhooks are unsigned in development.** Without `PAYPAL_WEBHOOK_ID` the receiver logs a warning and processes the event; production refuses with `503 paypal_webhook_unconfigured`.
 - **Only in-app reminders are on by default.** `NOTIFY_EMAIL`, `NOTIFY_PUSH` and `NOTIFY_WHATSAPP` stay off until `SMTP_URL`, an Expo token or WhatsApp credentials exist, so every member always gets the in-app nudge and nothing fails on a missing provider.
 - **The workers run inside the API process.** `JOBS_ENABLED=false` turns them off; `docker compose` still starts a single service, not a separate `worker` one.
-- **Sign-in is unverified on this machine.** §2.17 ships Log in with PayPal (verified email plus payer ID) and refuses email-only sign-in for linked accounts, but completing the consent round trip needs a sandbox personal account to log in with — the same blocker as the capture above — so the email form is what actually signs people in. Treat demo accounts as throwaway.
+- **Sign-in has not been exercised end to end.** §2.17 ships Log in with PayPal (verified email plus payer ID) and refuses email-only sign-in for linked accounts; the consent round trip needs a sandbox personal account, which now exists, so only the run itself is missing. The email form is what actually signs people in today.
 - **`notification_events` has no `group_id`**, so the delivery audit is queryable by member and channel but not per group.
 
 ### 11.3 Next up, in order

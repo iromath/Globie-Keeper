@@ -29,6 +29,11 @@ type GroupParams = { Params: { id: string } };
 
 type MemberListRow = MemberRow;
 
+type MyGroupRow = GroupRow & {
+  role: string;
+  member_count: number;
+};
+
 type TimelineRow = {
   time: Date;
   event_id: string;
@@ -224,6 +229,35 @@ export const groupRoutes: FastifyPluginAsync = async (app) => {
         member: mapMember({ ...member, display_name: displayName }),
       };
     });
+  });
+
+  /**
+   * Every table this member belongs to, newest first. Without it the app could
+   * only show a group created or joined in the current sitting, so signing back
+   * in looked like the memberships had been lost.
+   */
+  app.get('/groups', async (request) => {
+    const auth = requireUser(request);
+
+    const { rows } = await query<MyGroupRow>(
+      `select g.id, g.name, g.default_currency, g.owner_id, g.invite_token, g.created_at,
+              m.role,
+              (select count(*) from members x
+                where x.group_id = g.id and x.status <> 'removed')::int as member_count
+         from members m
+         join groups g on g.id = m.group_id
+        where m.user_id = $1 and m.status <> 'removed'
+        order by g.created_at desc`,
+      [auth.userId],
+    );
+
+    return {
+      groups: rows.map((row) => ({
+        ...mapGroup(row),
+        role: row.role,
+        memberCount: row.member_count,
+      })),
+    };
   });
 
   /** Everything the group screen renders in one round trip. */

@@ -18,9 +18,10 @@ import { colors, maxContentWidth, motion, radius, space } from './theme';
 
 type Destination = { label: string; glyph: IconName; glyphActive: IconName };
 
-/** Three destinations, one meaning each — the bar never grows a fourth by accident. */
+/** Four destinations, one meaning each — the bar never grows by accident. */
 const destinations: Record<string, Destination> = {
   index: { label: 'Home', glyph: icon.homeOutline, glyphActive: icon.home },
+  groups: { label: 'Groups', glyph: icon.peopleOutline, glyphActive: icon.people },
   'me/shares': { label: 'Shares', glyph: icon.sharesOutline, glyphActive: icon.shares },
   'me/activity': { label: 'Activity', glyph: icon.activityOutline, glyphActive: icon.activity },
 };

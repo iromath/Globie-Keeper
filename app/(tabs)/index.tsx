@@ -2,6 +2,7 @@ import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { GroupRow } from '@/components/groups/group-row';
 import { ShareRow } from '@/components/ledger/share-row';
 import { Button, IconButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,13 +19,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import { colors, space } from '@/components/ui/theme';
 import { useMoney } from '@/lib/money-context';
-import { useCreateGroup, useJoinGroup, useMyPoints, useMyShares } from '@/lib/queries';
+import { useCreateGroup, useJoinGroup, useMyGroups, useMyPoints, useMyShares } from '@/lib/queries';
 import { useSession } from '@/lib/session-context';
 
 const DEFAULT_CURRENCY = 'THB';
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
+  const groups = useMyGroups();
   const shares = useMyShares();
   const points = useMyPoints();
   const createGroup = useCreateGroup();
@@ -39,6 +41,7 @@ export default function HomeScreen() {
   const openShares = (shares.data?.shares ?? []).filter(
     (share) => share.status !== 'paid' && share.status !== 'settled'
   );
+  const myGroups = groups.data?.groups ?? [];
   const firstName = (session?.displayName ?? 'Friend').split(' ')[0];
 
   const owesMinor = shares.data?.outstandingMinor ?? 0;
@@ -119,6 +122,52 @@ export default function HomeScreen() {
         />
         <Stat glyph={icon.receipt} label="Open" value={String(openShares.length)} hint="unsettled bills" />
       </View>
+
+      {myGroups.length > 0 || groups.isLoading || groups.error ? (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text variant="title">Your tables</Text>
+            <Link href="/groups" asChild>
+              <Button variant="ghost" compact title="See all" icon={icon.chevronRight} iconSide="right" />
+            </Link>
+          </View>
+          {groups.isLoading ? (
+            <View style={styles.list} accessibilityElementsHidden>
+              <Skeleton height={62} />
+              <Skeleton height={62} />
+            </View>
+          ) : groups.error ? (
+            <Card>
+              <Text variant="label" tone="danger">
+                Could not load your groups
+              </Text>
+              <Text variant="caption" tone="muted">
+                {groups.error.message}
+              </Text>
+              <Button
+                variant="secondary"
+                compact
+                icon={icon.refresh}
+                title="Try again"
+                onPress={() => groups.refetch()}
+                style={styles.inline}
+              />
+            </Card>
+          ) : (
+            <View style={styles.list}>
+              {myGroups.slice(0, 3).map((group) => (
+                <GroupRow
+                  key={group.id}
+                  group={group}
+                  onPress={() =>
+                    router.push({ pathname: '/groups/[id]', params: { id: group.id } })
+                  }
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      ) : null}
 
       <Card>
         <SectionHeading glyph={icon.people} title="Start a dinner" hint="Open a table and invite the crew." />

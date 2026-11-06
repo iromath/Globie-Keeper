@@ -25,6 +25,12 @@ export type GroupDetail = {
   me: Member;
 };
 
+/** A membership row in the signed-in member's own group list. */
+export type MyGroup = Group & {
+  role: Member['role'];
+  memberCount: number;
+};
+
 export const queryKeys = {
   group: (groupId: string) => ['group', groupId] as const,
   timeline: (groupId: string) => ['timeline', groupId] as const,
@@ -33,6 +39,7 @@ export const queryKeys = {
   tips: (billId: string) => ['tips', billId] as const,
   fxRates: ['fx', 'rates'] as const,
   myProfile: ['me', 'profile'] as const,
+  myGroups: ['me', 'groups'] as const,
   myShares: ['me', 'shares'] as const,
   myPoints: ['me', 'points'] as const,
   myActivity: ['me', 'activity'] as const,
@@ -136,6 +143,14 @@ export function useFxRates() {
   });
 }
 
+/** Every table the member belongs to. The only stable way back into a group. */
+export function useMyGroups() {
+  return useQuery({
+    queryKey: queryKeys.myGroups,
+    queryFn: () => request<{ groups: MyGroup[] }>('/groups'),
+  });
+}
+
 export function useMyShares() {
   return useQuery({
     queryKey: queryKeys.myShares,
@@ -191,14 +206,19 @@ export function useCreateGroup() {
   return useMutation({
     mutationFn: (input: { name: string; currency: string }) =>
       request<{ group: Group; member: Member }>('/groups', { body: input }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['group'] }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.myGroups });
+      client.invalidateQueries({ queryKey: ['group'] });
+    },
   });
 }
 
 export function useJoinGroup() {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (input: { inviteToken: string; displayName: string }) =>
       request<{ group: Group; member: Member }>('/groups/join', { body: input }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myGroups }),
   });
 }
 
