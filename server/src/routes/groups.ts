@@ -71,7 +71,7 @@ async function loadLatestAgreement(
 ): Promise<AgreementRow | null> {
   const { rows } = await query<AgreementRow>(
     `select a.id, a.group_id, a.currency, a.estimated_total, a.deadline,
-            a.status, a.created_by,
+            a.status, a.created_by, a.fronted_by,
             (select count(*) from agreement_acceptances aa
               where aa.agreement_id = a.id) as accepted_count,
             (select count(*) from members m

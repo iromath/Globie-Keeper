@@ -12,7 +12,11 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 
 import { query, withTransaction } from '../db/pool.js';
-import { requireAgreementMember, requireBillMember } from './access.js';
+import {
+    requireAgreementMember,
+    requireBillMember,
+    requireFronter,
+} from './access.js';
 import {
     LOCKED,
     loadAllocations,
@@ -217,6 +221,7 @@ function billTotals(bill: {
 const parseReceiptMedia: ToolHandler = async (request, args) => {
   const billId = requiredUuid(args, 'bill_id');
   const ctx = await requireBillMember(request, billId);
+  requireFronter(ctx);
 
   if (LOCKED.has(ctx.status)) {
     throw ApiError.conflict('bill_locked', 'This bill is already locked');
@@ -304,6 +309,7 @@ function hintedMembers(args: Record<string, unknown>): string[] | null {
 const proposeAllocation: ToolHandler = async (request, args) => {
   const billId = requiredUuid(args, 'bill_id');
   const ctx = await requireBillMember(request, billId);
+  requireFronter(ctx);
 
   if (LOCKED.has(ctx.status)) {
     throw ApiError.conflict('bill_locked', 'This bill is already locked');
@@ -423,6 +429,7 @@ const proposeAllocation: ToolHandler = async (request, args) => {
 const requestItemConfirmation: ToolHandler = async (request, args) => {
   const billId = requiredUuid(args, 'bill_id');
   const ctx = await requireBillMember(request, billId);
+  requireFronter(ctx);
 
   if (LOCKED.has(ctx.status)) {
     throw ApiError.conflict('bill_locked', 'This bill is already locked');
@@ -501,6 +508,7 @@ const createPaymentRequest: ToolHandler = async (request, args, confirmToken) =>
   const billId = requiredUuid(args, 'bill_id');
   const shareId = requiredUuid(args, 'share_id');
   const ctx = await requireBillMember(request, billId);
+  requireFronter(ctx);
 
   const gate = demandConfirmation(
     'create_payment_request',
@@ -618,6 +626,7 @@ const sendReminder: ToolHandler = async (request, args, confirmToken) => {
 
   const share = await loadShareById(shareId);
   const ctx = await requireBillMember(request, share.bill_id);
+  requireFronter(ctx);
 
   const gate = demandConfirmation('send_reminder', args, confirmToken, ctx.member.id);
   if (gate) {
@@ -702,6 +711,7 @@ const awardPoints: ToolHandler = async (request, args, confirmToken) => {
   const reason = optionalString(args, 'reason', 40) ?? 'globie';
 
   const ctx = await requireAgreementMember(request, agreementId);
+  requireFronter(ctx);
 
   const gate = demandConfirmation('award_points', args, confirmToken, ctx.member.id);
   if (gate) {

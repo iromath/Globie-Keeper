@@ -75,8 +75,14 @@ export default function BillScreen() {
   const tips = useTips(bill?.id ?? '', locked);
   const allocations = useMemo(() => billQuery.data?.allocations ?? [], [billQuery.data]);
   const me = group.data?.me;
+  const agreement = group.data?.agreement;
+  const isFronter = Boolean(me && agreement?.frontedBy === me.id);
+  const fronterName =
+    group.data?.members.find((member) => member.id === agreement?.frontedBy)?.displayName ??
+    'The fronter';
   const currency = bill?.currency ?? group.data?.group.defaultCurrency ?? 'THB';
   const paidTips = (tips.data?.tips ?? []).filter((tip) => tip.status === 'paid');
+  const myTip = tips.data?.myTip ?? null;
 
   // The server's allocation is the truth. A tap is an overlay on top of it, and
   // the overlay dies the moment the server's version of the bill changes.
@@ -252,6 +258,31 @@ export default function BillScreen() {
     }
   }
 
+  /**
+   * The tip was approved in PayPal but never captured — a closed browser tab, a
+   * dropped callback. The server re-reads the order and flags it, so the capture
+   * can be finished here without another trip through the approval page.
+   */
+  async function finishTip(tipId: string) {
+    setBusy('tip');
+    setError(null);
+    try {
+      const capture = await captureTip.mutateAsync({ tipId });
+      notify({
+        title: 'Tip sent',
+        body:
+          capture.pointsAwarded > 0
+            ? `Kae Na thanks you — +${capture.pointsAwarded} Globie`
+            : 'Kae Na thanks you.',
+        points: capture.pointsAwarded,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not finish the tip');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (group.isLoading || (activeBillId && billQuery.isLoading)) {
     return (
       <Screen scroll={false}>
@@ -323,7 +354,17 @@ export default function BillScreen() {
         </View>
       ) : null}
 
-      {!bill || (!locked && bill.items.length === 0) ? (
+      {!isFronter && (!bill || (!locked && bill.items.length === 0)) ? (
+        <Card>
+          <SectionHeading
+            glyph={icon.time}
+            title="Waiting for the receipt"
+            hint={`${fronterName} covered this bill and will capture it. Your lines show up here once the split is proposed.`}
+          />
+        </Card>
+      ) : null}
+
+      {isFronter && (!bill || (!locked && bill.items.length === 0)) ? (
         <Card tone="accent">
           <SectionHeading
             glyph={bill ? icon.upload : icon.camera}
@@ -400,7 +441,11 @@ export default function BillScreen() {
               <SectionHeading
                 glyph={icon.receipt}
                 title="Who had what"
-                hint="Tap your name on every item you ate. Each member confirms their own lines."
+                hint={
+                  isFronter
+                    ? 'Tap a name on every item to assign it. Each member confirms their own lines.'
+                    : `${fronterName} is splitting this. You will confirm your own lines below.`
+                }
               />
               {bill.items.map((item, index) => (
                 <Card key={item.id} enter={index + 1} style={styles.itemCard}>
@@ -411,24 +456,37 @@ export default function BillScreen() {
                     </Text>
                     <Text variant="mono">{money.format(item.lineTotalMinor, currency)}</Text>
                   </View>
-                  <View style={styles.chips}>
-                    {(group.data?.members ?? []).map((member) => {
-                      const selected = (assignment[item.id] ?? []).includes(member.id);
-                      return (
-                        <Button
-                          key={member.id}
-                          compact
-                          variant={selected ? 'primary' : 'secondary'}
-                          icon={selected ? icon.check : undefined}
-                          title={member.displayName}
-                          accessibilityLabel={`${member.displayName}, ${
-                            selected ? 'on this item' : 'not on this item'
-                          }`}
-                          onPress={() => toggle(item.id, member.id)}
-                        />
-                      );
-                    })}
-                  </View>
+                  {isFronter ? (
+                    <View style={styles.chips}>
+                      {(group.data?.members ?? []).map((member) => {
+                        const selected = (assignment[item.id] ?? []).includes(member.id);
+                        return (
+                          <Button
+                            key={member.id}
+                            compact
+                            variant={selected ? 'primary' : 'secondary'}
+                            icon={selected ? icon.check : undefined}
+                            title={member.displayName}
+                            accessibilityLabel={`${member.displayName}, ${
+                              selected ? 'on this item' : 'not on this item'
+                            }`}
+                            onPress={() => toggle(item.id, member.id)}
+                          />
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text variant="caption" tone="muted">
+                      {(assignment[item.id] ?? [])
+                        .map(
+                          (memberId) =>
+                            (group.data?.members ?? []).find((member) => member.id === memberId)
+                              ?.displayName
+                        )
+                        .filter(Boolean)
+                        .join(', ') || 'Not assigned yet'}
+                    </Text>
+                  )}
                   {item.confidence < 0.8 ? (
                     <View style={styles.warnRow}>
                       <Icon name={icon.warning} size={13} color={colors.warn} />
@@ -439,13 +497,15 @@ export default function BillScreen() {
                   ) : null}
                 </Card>
               ))}
-              <Button
-                title="Save split"
-                variant="secondary"
-                icon={icon.checkDone}
-                onPress={saveAssignments}
-                loading={busy === 'assign'}
-              />
+              {isFronter ? (
+                <Button
+                  title="Save split"
+                  variant="secondary"
+                  icon={icon.checkDone}
+                  onPress={saveAssignments}
+                  loading={busy === 'assign'}
+                />
+              ) : null}
             </View>
           ) : null}
 
@@ -480,7 +540,7 @@ export default function BillScreen() {
             </Card>
           ) : null}
 
-          {pendingCount === 0 && allocations.length > 0 && !locked ? (
+          {isFronter && pendingCount === 0 && allocations.length > 0 && !locked ? (
             <Card>
               <SectionHeading
                 glyph={icon.lock}
@@ -496,7 +556,17 @@ export default function BillScreen() {
             </Card>
           ) : null}
 
-          {bill.status === 'FINALIZED' || bill.status === 'COLLECTING' ? (
+          {!isFronter && (bill.status === 'FINALIZED' || bill.status === 'COLLECTING') ? (
+            <Card>
+              <SectionHeading
+                glyph={icon.paypal}
+                title="Reimbursement"
+                hint={`${fronterName} paid the merchant. Pay your share from the My shares tab — the PayPal order names them as the payee, not Globie.`}
+              />
+            </Card>
+          ) : null}
+
+          {isFronter && (bill.status === 'FINALIZED' || bill.status === 'COLLECTING') ? (
             <Card>
               <SectionHeading
                 glyph={icon.paypal}
@@ -529,17 +599,51 @@ export default function BillScreen() {
                 title="Tip the fronter"
                 hint={`${tips.data.frontedByName} covered the bill. A tip is a thank-you, on top of your share.`}
               />
-              {tips.data.myTip ? (
-                <View style={styles.rowBetween}>
-                  <Text variant="body" style={styles.flex}>
-                    {tips.data.myTip.status === 'paid'
-                      ? 'You tipped'
-                      : 'Your tip is waiting for approval'}
+              {myTip && myTip.status === 'failed' ? (
+                <>
+                  <Text variant="body">
+                    The PayPal checkout didn&apos;t go through, so nothing was charged.
+                    Try again with one of these amounts.
                   </Text>
-                  <Text variant="mono">
-                    {money.format(tips.data.myTip.amountMinor, currency)}
-                  </Text>
-                </View>
+                  {tips.data.canTip ? (
+                    <View style={styles.chips}>
+                      {TIP_PRESETS.map((amountMinor) => (
+                        <Button
+                          key={amountMinor}
+                          compact
+                          variant="secondary"
+                          icon={icon.hand}
+                          title={formatMinor(amountMinor, currency)}
+                          accessibilityLabel={`Tip ${formatMinor(amountMinor, currency)}`}
+                          onPress={() => tipFronter(amountMinor)}
+                          disabled={busy === 'tip'}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+                </>
+              ) : myTip ? (
+                <>
+                  <View style={styles.rowBetween}>
+                    <Text variant="body" style={styles.flex}>
+                      {myTip.status === 'paid'
+                        ? 'You tipped'
+                        : 'Your tip is waiting for approval'}
+                    </Text>
+                    <Text variant="mono">
+                      {money.format(myTip.amountMinor, currency)}
+                    </Text>
+                  </View>
+                  {myTip.canFinish ? (
+                    <Button
+                      compact
+                      icon={icon.paypal}
+                      title="Finish payment"
+                      loading={busy === 'tip'}
+                      onPress={() => finishTip(myTip.id)}
+                    />
+                  ) : null}
+                </>
               ) : tips.data.canTip ? (
                 <View style={styles.chips}>
                   {TIP_PRESETS.map((amountMinor) => (

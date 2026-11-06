@@ -6,12 +6,12 @@ import { ApiError } from '../lib/http-error.js';
 import { recordEvent } from '../lib/ledger.js';
 import { mapAgreement, type AgreementRow } from '../lib/serialize.js';
 import {
-  asRecord,
-  currencyCode,
-  optionalDate,
-  pathUuid,
-  requiredMinor,
-  requiredUuid,
+    asRecord,
+    currencyCode,
+    optionalDate,
+    pathUuid,
+    requiredMinor,
+    requiredUuid,
 } from '../lib/validate.js';
 
 type AgreementParams = { Params: { id: string } };
@@ -21,7 +21,7 @@ type AgreementCounts = { accepted: number; total: number };
 async function loadAgreement(agreementId: string): Promise<AgreementRow> {
   const { rows } = await query<AgreementRow>(
     `select a.id, a.group_id, a.currency, a.estimated_total, a.deadline,
-            a.status, a.created_by,
+            a.status, a.created_by, a.fronted_by,
             (select count(*) from agreement_acceptances aa
               where aa.agreement_id = a.id) as accepted_count,
             (select count(*) from members m
@@ -76,7 +76,8 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
            (group_id, currency, estimated_total, deadline, terms_snapshot, status,
             created_by, fronted_by)
          values ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $6)
-         returning id, group_id, currency, estimated_total, deadline, status, created_by`,
+         returning id, group_id, currency, estimated_total, deadline, status,
+                   created_by, fronted_by`,
         [
           groupId,
           currency,

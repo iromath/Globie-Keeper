@@ -85,6 +85,7 @@ export default function GroupScreen() {
       (event) => event.type === 'agreement.accepted' && event.actor === me.displayName
     );
   const agreed = agreement?.status === 'accepted';
+  const isFronter = Boolean(agreement && agreement.frontedBy === me.id);
 
   async function onCreateAgreement() {
     const estimatedTotalMinor = toMinor(estimate || '0');
@@ -107,10 +108,12 @@ export default function GroupScreen() {
   }
 
   const billAction = bill
-    ? bill.items.length > 0
+    ? bill.items.length > 0 || !isFronter
       ? { title: 'Open the bill', glyph: icon.receipt }
       : { title: 'Upload the receipt', glyph: icon.upload }
-    : { title: 'Capture the receipt', glyph: icon.camera };
+    : isFronter
+      ? { title: 'Capture the receipt', glyph: icon.camera }
+      : { title: 'Waiting for the receipt', glyph: icon.time };
 
   return (
     <Screen bottomInset={space.xl}>
@@ -248,6 +251,7 @@ export default function GroupScreen() {
         billStatus={bill?.status ?? null}
         currency={currency}
         members={members}
+        isFronter={isFronter}
       />
 
       <View style={styles.linkRow}>

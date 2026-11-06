@@ -366,14 +366,15 @@ All money is stored as integer minor units. No floating point.
 
 ### 2.8 Allocation and confirmation
 
-1. Assign each item to one or more members
+1. Only the fronter assigns items — they paid the merchant, so the split is theirs to propose
 2. Shared items split equally among assignees
 3. Tax, service charge, and tip prorate by each member's subtotal share
 4. Discounts prorate the same way
 5. Round to minor units; assign the remainder to the fronter
 6. Assert `sum(shares) == bill.total`; block sending otherwise
 7. Each member confirms their own allocation; disputes reopen only that allocation
-8. Finalization requires all allocations confirmed or organizer-resolved, with an audit entry
+8. Only the fronter finalizes, and only when all allocations are confirmed or resolved, with an audit entry
+9. The fronter's own share is written as `settled` at finalization: they already paid the merchant for their own food, so no self-addressed PayPal order is needed and the bill can still close
 
 ### 2.9 PayPal integration
 
@@ -700,6 +701,13 @@ Errors: `bill_not_finalized`, `fronter_missing`, `fronter_paypal_missing`, `cann
 
 `createOrder` now takes `target: {kind: 'share' | 'tip'; id}` and a mandatory `payee`; the idempotency header is `globie-${kind}-${id}` and the return URL carries `?share=` or `?tip=`, so one `/paypal/return` screen serves both. Webhook order is `findShare → findTip → share_not_found`, with the identical `amountMatches()` guard applied to `tip.amount`.
 
+**A dead checkout is recoverable.** PayPal can refuse the payment on its own page: it shows a generic error instead of the return *or* cancel URL, so no capture runs, no webhook fires, and the row would sit in `requested` forever while the card keeps saying "waiting for approval".
+
+- `GET /api/bills/:id/tips` re-reads the caller's `requested` order with `readOrder()`. `VOIDED`, or still unapproved five minutes after it was opened, is a dead checkout: `failTip` closes it with a reason and the card goes back to offering amounts.
+- `POST /api/tips/:id/capture` does the same check when the capture throws: an order that is not `APPROVED`/`COMPLETED` becomes `failed` and the call answers `409 tip_checkout_incomplete` ("nothing was charged — you can try again") instead of a raw PayPal error.
+- `APPROVED` but never captured (closed tab, dropped callback) is different: the order still holds the payer's approval, so `myTip.canFinish` is true and the card offers **Finish payment** to capture it without another trip through checkout.
+- A retry reuses the tip row but sends a fresh `PayPal-Request-Id`, because PayPal replays the *original* response — including the refused order — for a reused key.
+
 **Settlement**
 
 - `requestTip` resolves the recipient's `paypal_email` before anything else and raises `409 fronter_paypal_missing` when it is absent — a tip with no payee would otherwise land in the platform account.
@@ -710,7 +718,7 @@ Errors: `bill_not_finalized`, `fronter_missing`, `fronter_paypal_missing`, `cann
 
 **UI**
 
-- `app/groups/[id]/bill.tsx`: a "Tip the fronter" card once the bill is locked — three one-tap sizes (20/50/100), the member's own tip state, and the list of tips already given.
+- `app/groups/[id]/bill.tsx`: a "Tip the fronter" card once the bill is locked — three one-tap sizes (20/50/100), the member's own tip state, and the list of tips already given. A `failed` tip re-offers the amounts with "the checkout didn't go through, nothing was charged", and a `canFinish` tip offers **Finish payment**.
 - `app/(tabs)/me/shares.tsx` keeps sending the *share* to checkout; paid shares vanish from that list, which is why the tip entry lives on the bill screen.
 - `app/paypal/return.tsx` branches on `?tip=` and thanks the member with Baby Kae Na (`+2 Globie`), replacing the route with Home.
 - Tips never appear in the leaderboard ranking; they only move the Globie balance.
@@ -1022,7 +1030,7 @@ Dates are fixed against the submission deadline, not effort estimates.
 
 ## 11. Build status
 
-Snapshot: **2026-11-06**. Updated whenever a milestone lands, so the plan and the repo never drift.
+Snapshot: **2026-11-07**. Updated whenever a milestone lands, so the plan and the repo never drift.
 
 ### 11.1 Done and verified against a live database
 
@@ -1038,8 +1046,11 @@ Local stack: PostgreSQL on `127.0.0.1:55432` (TimescaleDB optional; plain Postgr
 | Allocations: replace-set with largest-remainder `allocate()` | Done | Per-item weights split a 16,000 line as 8,000 / 8,000 with no penny loss |
 | Per-member confirmation of own lines | Done | Non-owner confirm rejected `not_your_line`; bill flips to `CONFIRMED` only when no `proposed` lines remain |
 | Finalize: shares, residue to the fronter, `sum(shares) == bill.total` assertion | Done | 29,500 items + 2,065 tax produced Ana 19,065 / Ben 12,500 THB minor = 31,565 exactly |
+| Fronter gate — only the payer steers the bill | Done | `requireFronter()` answers `403 fronter_only` on bill create, media, parse, allocations, finalize, request-payments and the five bill-mutating agent tools; `GET /groups/:id` now serialises `agreement.frontedBy`, so the client hides assign/save/finalize/request and the chat's steering prompts for everyone else |
+| Fronter's own share | Done | Finalize writes the fronter's line as `settled` instead of `proposed`, so no self-addressed order is needed and a fully paid bill can still reach `SETTLED` |
 | Request payments (PayPal Orders v2, one order per share) | Done against the live sandbox | Each order sets `purchase_units[].payee` to the fronter's PayPal email, so a capture settles to them and never to us. A local smoke run created order `38L31957VN943501N` with `payee.email_address = ana@example.com`, 355.00 THB, status `PAYER_ACTION_REQUIRED` |
 | Tips to the fronter (§2.18) | Done for order creation | `POST /api/bills/:id/tips` created `2NF49481XL416121G` at 100.00 THB payable to the same fronter (description *"Globie Keeper — tip for Ana"*); `POST /api/tips/:id/capture` is wired to `settleTip` but, like a share, needs a buyer approval to run |
+| Dead tip checkouts close and reopen | Done in code; a refused sandbox checkout is the end-to-end check left | `GET /api/bills/:id/tips` re-reads the caller's order and closes `VOIDED` or 5-minute-unapproved checkouts as `failed` (with a ledger reason); a failed capture marks the row `failed` and answers `409 tip_checkout_incomplete`; an `APPROVED` order sets `myTip.canFinish`, which drives **Finish payment**; a retry reuses the row with a fresh `PayPal-Request-Id` so PayPal cannot replay the refused order |
 | Fronter payee gate and *Getting paid* setting | Done | `POST /api/bills/:id/request-payments` and `POST /api/bills/:id/tips` answer `409 fronter_paypal_missing` when the fronter has no `paypal_email`; `GET /api/me` returns it, `PATCH /api/me {paypalEmail}` writes it to every active membership, and Settings → *Getting paid* exposes the field |
 | `POST /api/paypal/webhook` | Done | Verifies the signature, dedupes into `webhook_receipts`, reconciles the amount, audits into `webhook_events`; a replayed `PAYMENT.CAPTURE.COMPLETED` answers `{ok:true,duplicate:true}` |
 | Settlement: share `paid`, `payments` row, ledger `share.paid`, bill `SETTLED`, agreement `settled` | Done | Two captured shares rolled the bill and agreement to `settled`; `ledger_events` carries `hours_to_pay` for the repayment aggregate |
@@ -1063,7 +1074,7 @@ Local stack: PostgreSQL on `127.0.0.1:55432` (TimescaleDB optional; plain Postgr
 | Worker heartbeat on `/health` | Done | `GET /health` reports `worker: {ok, enabled, running, lastHeartbeatAt, heartbeatAgeSeconds}` fed by `markWorkerHeartbeat()`, and a sweep older than 15 minutes turns the route into `503 degraded` |
 | Globie chat surface | Done | `components/chat/globie-chat.tsx` mounted on the group screen: free text maps to one of the seven tools, "pay the fronter back" routes to `create_payment_request`, a `confirmationRequired` answer parks the token behind `AWAITING YOUR OK` and replays the identical arguments, and `share_id` is resolved through `get_bill_status` with member chips |
 
-Typecheck (`tsc --noEmit`) and production build (`tsc`) are clean.
+Typecheck (`tsc --noEmit` for the client and the server), `expo lint` and the server production build (`tsc -p tsconfig.json`) are clean.
 
 ### 11.2 Known gaps in the demo path
 
@@ -1081,6 +1092,7 @@ Typecheck (`tsc --noEmit`) and production build (`tsc`) are clean.
 2. Wire the client chat surface to `POST /api/agent/message` so the demo drives Globie by conversation. — **done**: `components/chat/globie-chat.tsx`, mounted on `app/groups/[id]/index.tsx`.
 3. Log in with PayPal (§2.17): `005_paypal_login.sql`, the identity helpers in `server/src/lib/paypal.ts`, `/auth/paypal/{start,callback,handoff}`, `signInWithPayPal` with the web/native branch, the branded button on `components/sign-in.tsx`, and `app/paypal/login.tsx` behind the `Gate` change. — **done**: server and client both typecheck, lint and export; the preview fixtures now walk the flow end to end in a browser; README, `.env.example` and the Postman `01b` folder document the setup and cover `start` plus the `handoff` reject path. The sandbox consent round trip is the only part left, and it is credential-gated (§11.2).
 4. No-custody reimbursement (§2.9 / §2.18): `purchase_units[].payee` on every order, `009_payee_direct.sql`, the `409 fronter_paypal_missing` gate, `PATCH /me {paypalEmail}`, and Settings → *Getting paid*. — **done**: Payouts v1 and the `create_payout` tool are deleted, so the capture is the settlement and the platform never holds funds; typecheck, lint and the server suite are green. A live capture into a third-party payee is the one sandbox check left (§11.2).
+5. Fronter gate and dead-checkout recovery: `requireFronter()` on every bill-mutating route and agent tool, `agreement.frontedBy` in the group payload, a settled fronter share at finalize, and the tip reconcile/retry path. — **done**: members can no longer split or lock someone else's bill, a fronter never owes themselves a PayPal order, and a refused tip checkout closes instead of hanging on "waiting for approval". Client and server typecheck, lint and the server build are clean; a refused sandbox checkout is the end-to-end check left (§11.1).
 
 Nothing else is queued. What is left is credential-gated, not code: `VISION_API_KEY` for the receipt path and `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` for a live sandbox capture (§11.2). Log in with PayPal adds nothing new to that list beyond registering the dashboard **Return URL** — it reuses the same client ID and secret.
 

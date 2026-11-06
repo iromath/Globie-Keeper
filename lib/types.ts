@@ -33,6 +33,7 @@ export type Agreement = {
   deadline: string | null;
   status: 'draft' | 'pending' | 'accepted' | 'cancelled' | 'settled';
   createdBy: string;
+  frontedBy: string | null;
   acceptedCount: number;
   memberCount: number;
 };
@@ -120,6 +121,8 @@ export type Tip = {
   paypalOrderId?: string | null;
   /** Browser approval link; only present while the tip is `requested`. */
   approveUrl?: string | null;
+  /** PayPal holds an approval we can still capture; only on a `requested` tip. */
+  canFinish?: boolean;
 };
 
 export type TipsResponse = {

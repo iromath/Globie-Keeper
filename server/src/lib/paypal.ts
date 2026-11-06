@@ -123,6 +123,12 @@ export async function createOrder(input: {
   currency: string;
   description: string;
   payee: Payee;
+  /**
+   * Overrides the deterministic idempotency key. PayPal replays the original
+   * response for a reused key — including an order the payer already refused —
+   * so a retry has to send a new one.
+   */
+  requestId?: string;
 }): Promise<{ id: string; approveUrl: string }> {
   const token = await accessToken();
 
@@ -131,7 +137,8 @@ export async function createOrder(input: {
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'PayPal-Request-Id': `globie-${input.target.kind}-${input.target.id}`,
+      'PayPal-Request-Id':
+        input.requestId ?? `globie-${input.target.kind}-${input.target.id}`,
     },
     body: JSON.stringify({
       intent: 'CAPTURE',
@@ -248,6 +255,18 @@ async function getOrder(orderId: string): Promise<CaptureResponse> {
   }
 
   return (await response.json()) as CaptureResponse;
+}
+
+/**
+ * Read an order without touching it. The checkout status is the only way to
+ * tell an approval we never captured (`APPROVED`) from a checkout PayPal
+ * refused at its own page (`CREATED` forever, no webhook, no return URL).
+ */
+export async function readOrder(
+  orderId: string,
+): Promise<{ status: string; captureId: string | null }> {
+  const order = await getOrder(orderId);
+  return { status: order.status, captureId: firstCapture(order)?.captureId ?? null };
 }
 
 /**

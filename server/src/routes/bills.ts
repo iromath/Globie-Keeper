@@ -6,7 +6,11 @@ import '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 
 import { query, withTransaction } from '../db/pool.js';
-import { requireAgreementMember, requireBillMember } from '../lib/access.js';
+import {
+    requireAgreementMember,
+    requireBillMember,
+    requireFronter,
+} from '../lib/access.js';
 import {
     LOCKED,
     loadAllocations,
@@ -106,6 +110,8 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     const agreementId = requiredUuid(body, 'agreementId');
     const ctx = await requireAgreementMember(request, agreementId);
 
+    requireFronter(ctx);
+
     if (ctx.status === 'cancelled' || ctx.status === 'settled') {
       throw ApiError.conflict('agreement_closed', 'This agreement is closed');
     }
@@ -143,6 +149,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   app.post<BillParams>('/bills/:id/media', async (request) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
     if (LOCKED.has(ctx.status)) {
       throw ApiError.conflict('bill_locked', 'This bill is already locked');
     }
@@ -210,6 +217,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   app.post<BillParams>('/bills/:id/parse', async (request) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
 
     if (LOCKED.has(ctx.status)) {
       throw ApiError.conflict('bill_locked', 'This bill is already locked');
@@ -248,6 +256,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   app.patch<BillParams>('/bills/:id/allocations', async (request) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
 
     if (LOCKED.has(ctx.status)) {
       throw ApiError.conflict('bill_locked', 'This bill is already locked');
@@ -437,6 +446,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   app.post<BillParams>('/bills/:id/finalize', async (request) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
 
     const current = await loadBill(billId);
 
@@ -507,6 +517,11 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     const dueAt =
       agreement.deadline ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
+    // The fronter already handed the merchant the money for their own food, so
+    // that share is spent, not owed. Asking them to reimburse themselves would
+    // need a self-addressed PayPal order and would keep the bill open forever.
+    const fronterId = agreement.fronted_by ?? ctx.member.id;
+
     await withTransaction(async (tx) => {
       await tx.query(
         `delete from shares where bill_id = $1 and status = 'proposed'`,
@@ -514,10 +529,11 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       );
 
       for (const [memberId, amount] of rows) {
+        const status = memberId === fronterId ? 'settled' : 'proposed';
         await tx.query(
           `insert into shares (bill_id, member_id, amount, currency, status, due_at)
-           values ($1, $2, $3, $4, 'proposed', $5)`,
-          [billId, memberId, amount, currency, dueAt],
+           values ($1, $2, $3, $4, $5, $6)`,
+          [billId, memberId, amount, currency, status, dueAt],
         );
       }
 
@@ -550,6 +566,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   app.post<BillParams>('/bills/:id/request-payments', async (request) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
 
     if (ctx.status !== 'FINALIZED' && ctx.status !== 'COLLECTING') {
       throw ApiError.conflict(

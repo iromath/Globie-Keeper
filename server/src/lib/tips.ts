@@ -9,12 +9,14 @@
  * of what settles the bill, so it must never make an unpaid bill look paid.
  */
 
-import type { Db } from '../db/pool.js';
-import { query, withTransaction } from '../db/pool.js';
+
+import { randomUUID } from 'node:crypto';
+
+import { query, withTransaction, type Db } from '../db/pool.js';
 import { extractSettledRate, type SettledRate } from './fx.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
-import { createOrder, isPayPalConfigured } from './paypal.js';
+import { createOrder, isPayPalConfigured, readOrder } from './paypal.js';
 import { awardGlobie } from './settlement.js';
 
 /** Tipping is a nice gesture, not a race — a flat reward, one per member. */
@@ -155,6 +157,10 @@ export async function requestTip(
 
   const existing = existingRows[0];
   let tipId: string;
+  // A reused row means the previous order is dead. PayPal replays the original
+  // response for a reused PayPal-Request-Id — including an order the payer
+  // already refused — so a retry needs a key of its own.
+  let reuseOfDeadOrder = false;
 
   if (existing) {
     if (existing.status === 'paid') {
@@ -197,6 +203,7 @@ export async function requestTip(
       [existing.id, input.amountMinor, input.currency, input.message],
     );
     tipId = existing.id;
+    reuseOfDeadOrder = true;
   } else {
     const { rows: insertedRows } = await query<{ id: string }>(
       `insert into tips
@@ -235,6 +242,9 @@ export async function requestTip(
       input.merchant ? ` · ${input.merchant}` : ''
     }`,
     payee: { email: payeeEmail },
+    requestId: reuseOfDeadOrder
+      ? `globie-tip-${tipId}-${randomUUID()}`
+      : undefined,
   });
 
   await withTransaction(async (tx) => {
@@ -368,6 +378,8 @@ export async function settleTip(input: SettleTipInput): Promise<SettleTipResult>
 export async function failTip(input: {
   tipId: string;
   actor: string;
+  /** Why it died, when it was not a captured-then-denied payment. */
+  reason?: string;
 }): Promise<void> {
   await withTransaction(async (tx) => {
     const tip = await loadTip(tx, input.tipId, true);
@@ -387,10 +399,62 @@ export async function failTip(input: {
       amountMinor: tip.amount,
       currency: tip.currency.trim(),
       actor: input.actor,
-      summary: `PayPal declined ${tip.from_member_name}'s tip for ${tip.to_member_name}`,
+      summary: input.reason
+        ? `${tip.from_member_name}'s tip for ${tip.to_member_name} ${input.reason}`
+        : `PayPal declined ${tip.from_member_name}'s tip for ${tip.to_member_name}`,
       metadata: { tip_id: tip.id },
     });
   });
+}
+
+/**
+ * How long an unapproved PayPal checkout may sit before it counts as dead. The
+ * browser is the only place a checkout can be approved, so a row that is still
+ * unapproved this long after it was opened was abandoned or refused; waiting
+ * longer just leaves the card saying "waiting for approval".
+ */
+const CHECKOUT_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * A checkout PayPal refuses at its own page never comes back to us: PayPal
+ * shows a generic error instead of the return (or cancel) URL, so no capture
+ * runs and no webhook fires. The row would sit in `requested` forever and the
+ * card would keep saying "waiting for approval". Re-read the order when the
+ * tipping member loads the bill, close the dead checkouts and report whether
+ * PayPal holds an approval we can still capture.
+ */
+export async function reconcileTip(tip: {
+  id: string;
+  status: string;
+  paypal_order_id: string | null;
+  created_at: Date;
+}): Promise<{ status: string; canFinish: boolean }> {
+  if (
+    tip.status !== 'requested' ||
+    !tip.paypal_order_id ||
+    !isPayPalConfigured()
+  ) {
+    return { status: tip.status, canFinish: false };
+  }
+
+  const order = await readOrder(tip.paypal_order_id).catch(() => null);
+  if (!order) return { status: tip.status, canFinish: false };
+
+  if (order.status === 'APPROVED' || order.status === 'COMPLETED') {
+    return { status: tip.status, canFinish: true };
+  }
+
+  const stale = Date.now() - new Date(tip.created_at).getTime() > CHECKOUT_TTL_MS;
+  if (order.status === 'VOIDED' || stale) {
+    await failTip({
+      tipId: tip.id,
+      actor: 'PayPal',
+      reason: 'did not go through — the PayPal checkout was not completed',
+    });
+    return { status: 'failed', canFinish: false };
+  }
+
+  return { status: tip.status, canFinish: false };
 }
 
 /**

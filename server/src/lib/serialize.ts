@@ -88,6 +88,7 @@ export type AgreementRow = {
   deadline: Date | null;
   status: string;
   created_by: string;
+  fronted_by?: string | null;
   accepted_count?: number | string;
   member_count?: number | string;
 };
@@ -106,6 +107,7 @@ export function mapAgreement(row: AgreementRow) {
       | 'cancelled'
       | 'settled',
     createdBy: row.created_by,
+    frontedBy: row.fronted_by ?? null,
     acceptedCount: numeric(row.accepted_count),
     memberCount: numeric(row.member_count),
   };

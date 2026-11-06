@@ -440,6 +440,9 @@ export function useCaptureTip() {
       client.invalidateQueries({ queryKey: queryKeys.myPoints });
       client.invalidateQueries({ queryKey: ['timeline'] });
     },
+    // A checkout PayPal refused leaves the tip `failed` server-side; refetching
+    // turns the card back into an offer instead of a dead "waiting" row.
+    onError: () => client.invalidateQueries({ queryKey: ['tips'] }),
   });
 }
 

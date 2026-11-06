@@ -26,6 +26,8 @@ type Props = {
   billStatus: string | null;
   currency: string;
   members: Member[];
+  /** Only the member who paid the merchant may steer the bill. */
+  isFronter: boolean;
 };
 
 type Message = { id: string; from: 'you' | 'globie'; text: string };
@@ -73,7 +75,14 @@ const toolCopy: Record<AgentToolName, string> = {
  * money or messages a member comes back as `confirmationRequired` and is only
  * replayed — with the same arguments — after the user taps Confirm.
  */
-export function GlobieChat({ agreementId, billId, billStatus, currency, members }: Props) {
+export function GlobieChat({
+  agreementId,
+  billId,
+  billStatus,
+  currency,
+  members,
+  isFronter,
+}: Props) {
   const agent = useAgentMessage();
   const busy = agent.isPending;
 
@@ -81,7 +90,9 @@ export function GlobieChat({ agreementId, billId, billStatus, currency, members 
     {
       id: 'm0',
       from: 'globie',
-      text: 'I can read the receipt, split it, ask everyone to confirm, chase a late payer, or request reimbursement. Tell me what you need.',
+      text: isFronter
+        ? 'I can read the receipt, split it, ask everyone to confirm, chase a late payer, or request reimbursement. Tell me what you need.'
+        : 'The fronter holds this bill. I can tell you who still owes — pay your share from the My shares tab.',
     },
   ]);
   const [draft, setDraft] = useState('');
@@ -93,14 +104,15 @@ export function GlobieChat({ agreementId, billId, billStatus, currency, members 
   const splittable = Boolean(billId) && SPLITTABLE.has(billStatus ?? '');
 
   const quick: string[] = [];
-  if (splittable) {
+  if (isFronter && splittable) {
     quick.push('Split the bill', 'Ask everyone to confirm');
   }
   if (collected) {
-    quick.push('Who still owes?', 'Nudge the late payer');
+    quick.push('Who still owes?');
   }
-  if (agreementId && collected) {
-    quick.push('Ask everyone to pay');
+  if (isFronter && collected) {
+    quick.push('Nudge the late payer');
+    if (agreementId) quick.push('Ask everyone to pay');
   }
 
   function say(from: Message['from'], text: string) {
@@ -210,6 +222,14 @@ export function GlobieChat({ agreementId, billId, billStatus, currency, members 
     say('you', line);
 
     const intent = parseIntent(line, members);
+
+    if (intent.kind !== 'status' && intent.kind !== 'unknown' && !isFronter) {
+      say(
+        'globie',
+        'Only the fronter can steer this bill — they are the one who paid the merchant. I can still tell you who owes, and you can pay your share from the My shares tab.'
+      );
+      return;
+    }
 
     try {
       if (intent.kind === 'read_receipt' || intent.kind === 'split' || intent.kind === 'confirm_lines' || intent.kind === 'status') {

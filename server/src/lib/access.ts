@@ -217,6 +217,7 @@ export type BillContext = {
   groupId: string;
   currency: string;
   status: string;
+  frontedBy: string | null;
   member: MemberContext;
 };
 
@@ -229,8 +230,9 @@ export async function requireBillMember(
     group_id: string;
     currency: string;
     status: string;
+    fronted_by: string | null;
   }>(
-    `select b.agreement_id, a.group_id, b.currency, b.status
+    `select b.agreement_id, a.group_id, b.currency, b.status, a.fronted_by
        from bills b
        join agreements a on a.id = b.agreement_id
       where b.id = $1`,
@@ -247,6 +249,20 @@ export async function requireBillMember(
     groupId: row.group_id,
     currency: row.currency.trim(),
     status: row.status,
+    frontedBy: row.fronted_by,
     member,
   };
+}
+
+type FronterScope = { frontedBy: string | null; member: MemberContext };
+
+/** The fronter paid the merchant; only they steer the bill. */
+export function isFronter(ctx: FronterScope): boolean {
+  return ctx.frontedBy !== null && ctx.frontedBy === ctx.member.id;
+}
+
+export function requireFronter(ctx: FronterScope): void {
+  if (!isFronter(ctx)) {
+    throw new ApiError(403, 'fronter_only', 'Only the fronter can do this');
+  }
 }

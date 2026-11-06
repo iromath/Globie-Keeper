@@ -9,9 +9,15 @@ import type { FastifyPluginAsync } from 'fastify';
 import { query } from '../db/pool.js';
 import { requireBillMember, requireTipMember } from '../lib/access.js';
 import { ApiError } from '../lib/http-error.js';
-import { captureOrder, isPayPalConfigured } from '../lib/paypal.js';
+import { captureOrder, isPayPalConfigured, readOrder } from '../lib/paypal.js';
 import { mapTip } from '../lib/serialize.js';
-import { listTips, requestTip, settleTip } from '../lib/tips.js';
+import {
+    failTip,
+    listTips,
+    reconcileTip,
+    requestTip,
+    settleTip
+} from '../lib/tips.js';
 import {
     asRecord,
     optionalString,
@@ -56,7 +62,24 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
     const fronter = await loadFronter(ctx.agreementId);
+
+    // Only the caller's own pending tip costs a PayPal round-trip; a declined
+    // checkout is closed here so the card can offer a retry (see reconcileTip).
+    const { rows: mineRows } = await query<{
+      id: string;
+      status: string;
+      paypal_order_id: string | null;
+      created_at: Date;
+    }>(
+      `select id, status, paypal_order_id, created_at
+         from tips where bill_id = $1 and from_member_id = $2`,
+      [billId, ctx.member.id],
+    );
+    const mine = mineRows[0];
+    const payment = mine ? await reconcileTip(mine) : null;
+
     const tips = (await listTips(billId)).map(mapTip);
+    const myTip = tips.find((tip) => tip.fromMemberId === ctx.member.id) ?? null;
 
     return {
       billId,
@@ -67,7 +90,12 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
       totalMinor: tips
         .filter((tip) => tip.status === 'paid')
         .reduce((sum, tip) => sum + tip.amountMinor, 0),
-      myTip: tips.find((tip) => tip.fromMemberId === ctx.member.id) ?? null,
+      myTip: myTip
+        ? {
+            ...myTip,
+            canFinish: (payment?.canFinish ?? false) && myTip.status === 'requested',
+          }
+        : null,
       tips,
     };
   });
@@ -153,7 +181,30 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
-    const capture = await captureOrder(ctx.paypalOrderId);
+    let capture: Awaited<ReturnType<typeof captureOrder>>;
+    try {
+      capture = await captureOrder(ctx.paypalOrderId);
+    } catch (cause) {
+      // A checkout PayPal refuses at its own page never comes back to us: it
+      // shows a generic error instead of the return URL, so no webhook fires and
+      // the row would sit on "waiting for approval" until the TTL expires. The
+      // payer is here, right after the browser closed, so an order that is still
+      // unapproved now is a dead checkout, not a slow one.
+      const order = await readOrder(ctx.paypalOrderId).catch(() => null);
+      if (order && order.status !== 'APPROVED' && order.status !== 'COMPLETED') {
+        await failTip({
+          tipId,
+          actor: ctx.member.displayName,
+          reason: 'did not go through — the PayPal checkout was not completed',
+        });
+        throw ApiError.conflict(
+          'tip_checkout_incomplete',
+          'PayPal did not complete this payment, so nothing was charged — you can try again',
+        );
+      }
+      throw cause;
+    }
+
     const result = await settleTip({
       tipId,
       orderId: ctx.paypalOrderId,
