@@ -1,0 +1,1322 @@
+{
+  "info": {
+    "_postman_id": "c4f0d9e6-8a52-4f47-9b31-6d0e2a7c5f18",
+    "name": "Globie Keeper",
+    "description": "End-to-end walkthrough of the Globie Keeper API (agreement-first group-bill reimbursement).\n\n**Run order**: Health → Auth → Seeded demo → Agent tools → Full create flow → PayPal sandbox.\n\n**Before running**\n\n1. `docker compose up -d db` then `npm --prefix server run seed` (seed is explicit, never part of deploy).\n2. Start the API: `npm --prefix server run dev` (defaults to `http://localhost:3001`).\n3. Import `local.postman_environment.json` and select it.\n\n**What works without any credentials**\n\nFolders 01–03 run against the deterministic seed: group `KHAOSI`, one 1 200.00 THB bill split Ana 445.00 / Ben 400.00 / Chai 355.00, Ana already paid (10 Globie, rank 1), Ben `requested` against order `DEMO-BEN-ORDER`, Chai `confirmed`. `POST /paypal/webhook` is accepted unverified in development, so settling Ben needs no PayPal account — and that unlocks `award_points` for him.\n\n**What needs credentials**\n\n- Folder 04 stops being meaningful after `POST /bills/:id/parse` unless `VISION_API_KEY` is set: the extractor returns no draft, the bill falls back to `UPLOADED` and `PATCH /bills/:id/allocations` answers 409 `bill_empty`. Set `receiptPath` to a photo of a real receipt first.\n- Folder 05 needs PayPal sandbox credentials (`PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`) and a public `PUBLIC_ORIGIN`. Without them the API answers 409 `paypal_not_configured` and moves no money.\n\nEvery collection variable (`anaToken`, `billId`, `benShareId`, …) is filled in by earlier requests, so a full run needs no manual copying.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 · Health",
+      "description": "Cheap liveness probe. The same handler is mounted at `/health` (container healthcheck) and `/api/health` (through the proxy).",
+      "item": [
+        {
+          "name": "Health — API and database",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status is ok', () => pm.expect(body.status).to.eql('ok'));",
+                  "pm.test('database probe passed', () => pm.expect(body.database.ok).to.eql(true));",
+                  "pm.test('TimescaleDB is loaded', () => pm.expect(body.database.timescale).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health",
+            "auth": { "type": "noauth" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 · Auth",
+      "description": "Passwordless sessions. `POST /auth/session` needs both `email` and `displayName` and returns an opaque bearer token; every later request uses it.",
+      "item": [
+        {
+          "name": "Sign in — Ana (owner, fronter)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('returns a session', () => {",
+                  "  pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.userId).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.displayName).to.eql('Ana');",
+                  "});",
+                  "pm.collectionVariables.set('anaToken', body.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ana@example.com\",\n  \"displayName\": \"Ana\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/session",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Sign in — Ben",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('benToken', body.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ben@example.com\",\n  \"displayName\": \"Ben\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/session",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Sign in — Chai",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('chaiToken', body.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"chai@example.com\",\n  \"displayName\": \"Chai\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/session",
+            "auth": { "type": "noauth" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01b · Log in with PayPal (optional)",
+      "description": "Identity-only sign-in (DEV_PLAN §2.17). It reuses `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` but never moves money. Both `start` and `callback` are browser-driven, so they answer with a 302 and never the JSON error contract — the collection turns redirect-following off to see that. Note `POST /auth/session` refuses an address that is already PayPal-linked with `409 use_paypal_login`.",
+      "item": [
+        {
+          "name": "Start sign-in — 302 to PayPal",
+          "protocolProfileBehavior": { "followRedirects": false },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const location = pm.response.headers.get('Location') || '';",
+                  "pm.test('302, not the JSON error contract', () => pm.response.to.have.status(302));",
+                  "pm.test('PayPal consent page, or a readable refusal', () => {",
+                  "  pm.expect(location).to.match(/paypal\\.com\\/connect|error=paypal_not_configured/);",
+                  "});",
+                  "if (location.includes('connect')) {",
+                  "  const state = new URL(location).searchParams.get('state');",
+                  "  pm.test('state is single-use and present', () => pm.expect(state).to.be.a('string').and.not.empty);",
+                  "  pm.collectionVariables.set('paypalState', state);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/paypal/start?surface=web",
+            "auth": { "type": "noauth" },
+            "description": "Without credentials this still answers 302, but points at `/paypal/login?error=paypal_not_configured` instead of PayPal — the test accepts either branch, so the folder runs on a bare server."
+          }
+        },
+        {
+          "name": "Hand-off with a forged code — 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('invalid_handoff, no session leaked', () => {",
+                  "  pm.expect(body.code).to.eql('invalid_handoff');",
+                  "  pm.expect(body.token).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"forged-handoff-code-0000000000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/paypal/handoff",
+            "auth": { "type": "noauth" },
+            "description": "Runs with no credentials and no Postgres. Also the replay check: a code is spent by its first exchange, so re-running a real one gives the same 401."
+          }
+        },
+        {
+          "name": "Hand-off — exchange a real code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('a normal bearer session comes back', () => {",
+                  "  pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.userId).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('paypalToken', body.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{handoffCode}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/paypal/handoff",
+            "auth": { "type": "noauth" },
+            "description": "Set `handoffCode` from the `handoff=` parameter PayPal's callback appended to the return URL. Codes expire after 60 seconds, so copy one straight from the browser."
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 · Seeded demo (no credentials)",
+      "description": "Reads the deterministic seed. There is no `GET /groups` list route, so the collection resolves ids by joining with the seeded invite code `KHAOSI` — the endpoint is idempotent for members who already belong.",
+      "item": [
+        {
+          "name": "Join the demo group — Ana",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('joined Khao Soi Crew', () => pm.expect(body.group.name).to.eql('Khao Soi Crew'));",
+                  "pm.test('invite code round-trips', () => pm.expect(body.group.inviteToken).to.eql('KHAOSI'));",
+                  "pm.collectionVariables.set('groupId', body.group.id);",
+                  "pm.collectionVariables.set('anaMemberId', body.member.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"{{inviteToken}}\",\n  \"displayName\": \"Ana\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups/join",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Join the demo group — Ben",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('benMemberId', body.member.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"{{inviteToken}}\",\n  \"displayName\": \"Ben\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups/join",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{benToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Join the demo group — Chai",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('chaiMemberId', body.member.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"{{inviteToken}}\",\n  \"displayName\": \"Chai\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups/join",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{chaiToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Group snapshot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('three active members', () => pm.expect(body.members).to.have.lengthOf(3));",
+                  "pm.test('agreement is accepted', () => pm.expect(body.agreement.status).to.eql('accepted'));",
+                  "pm.test('bill is collecting', () => pm.expect(body.bill.status).to.eql('COLLECTING'));",
+                  "pm.test('I am the owner', () => pm.expect(body.me.role).to.eql('owner'));",
+                  "pm.collectionVariables.set('agreementId', body.agreement.id);",
+                  "pm.collectionVariables.set('billId', body.bill.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Bill detail and shares",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('six receipt lines', () => pm.expect(body.bill.items).to.have.lengthOf(6));",
+                  "const shares = body.shares;",
+                  "pm.test('three shares', () => pm.expect(shares).to.have.lengthOf(3));",
+                  "const sum = shares.reduce((total, share) => total + share.amountMinor, 0);",
+                  "pm.test('shares add up to the bill total', () => pm.expect(sum).to.eql(body.bill.totalMinor));",
+                  "const byMember = (id) => shares.find((share) => share.memberId === id);",
+                  "const ana = byMember(pm.collectionVariables.get('anaMemberId'));",
+                  "const ben = byMember(pm.collectionVariables.get('benMemberId'));",
+                  "const chai = byMember(pm.collectionVariables.get('chaiMemberId'));",
+                  "pm.collectionVariables.set('anaShareId', ana.id);",
+                  "pm.collectionVariables.set('benShareId', ben.id);",
+                  "pm.collectionVariables.set('chaiShareId', chai.id);",
+                  "pm.collectionVariables.set('anaAmount', (ana.amountMinor / 100).toFixed(2));",
+                  "pm.collectionVariables.set('benAmount', (ben.amountMinor / 100).toFixed(2));",
+                  "pm.collectionVariables.set('chaiAmount', (chai.amountMinor / 100).toFixed(2));",
+                  "pm.test('Ana already paid', () => pm.expect(ana.status).to.eql('paid'));",
+                  "pm.test('Ben has a request out', () => {",
+                  "  pm.expect(ben.status).to.eql('requested');",
+                  "  pm.expect(ben.paypalOrderId).to.eql('DEMO-BEN-ORDER');",
+                  "});",
+                  "pm.test('Chai is still confirmed', () => pm.expect(chai.status).to.eql('confirmed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bills/{{billId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Timeline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('timeline is populated', () => pm.expect(body.events.length).to.be.above(10));",
+                  "pm.test('events are chronological', () => {",
+                  "  const times = body.events.map((event) => Date.parse(event.at));",
+                  "  const sorted = [...times].sort((left, right) => left - right);",
+                  "  pm.expect(times).to.eql(sorted);",
+                  "});",
+                  "pm.test('the story mentions the reminder', () => {",
+                  "  const summaries = body.events.map((event) => event.summary).join(' | ');",
+                  "  pm.expect(summaries).to.include('Globie nudged Chai');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/timeline",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Leaderboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('every member is ranked', () => pm.expect(body.rows).to.have.lengthOf(3));",
+                  "const ana = body.rows.find((row) => row.memberId === pm.collectionVariables.get('anaMemberId'));",
+                  "pm.test('Ana is the hero', () => pm.expect(ana.isHero).to.eql(true));",
+                  "pm.test('Ana fronted the bill', () => pm.expect(ana.frontedMinor).to.be.above(0));",
+                  "pm.test('Ana holds 10 Globie', () => pm.expect(ana.globieBalance).to.eql(10));",
+                  "pm.test('the repayment clock reads 18 hours', () => pm.expect(ana.repaymentSpeedHours).to.be.closeTo(18, 1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/leaderboard",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Ben's open shares",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('one outstanding share', () => pm.expect(body.shares).to.have.lengthOf(1));",
+                  "pm.test('it is 400.00 THB and requested', () => {",
+                  "  pm.expect(body.shares[0].amountMinor).to.eql(40000);",
+                  "  pm.expect(body.shares[0].status).to.eql('requested');",
+                  "  pm.expect(body.currency).to.eql('THB');",
+                  "});",
+                  "pm.test('outstanding total matches', () => pm.expect(body.outstandingMinor).to.eql(40000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/shares",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{benToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Ana's Globie balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ana earned 10 Globie for paying first', () => pm.expect(body.balance).to.eql(10));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/points",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Agent tool catalogue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('seven tools are exposed', () => pm.expect(body.tools).to.have.lengthOf(7));",
+                  "pm.test('the money-moving tools are present', () => {",
+                  "  pm.expect(body.tools).to.include.members(['create_payment_request', 'send_reminder', 'award_points']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/agent/tools",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 · Agent tools",
+      "description": "The §2.11 contract. Four tools move money or message people, so they answer with a confirmation challenge first; replaying the identical body with the returned `confirmToken` executes. Tokens are bound to the member, the tool and a SHA-256 of the canonical args, and expire after 10 minutes.",
+      "item": [
+        {
+          "name": "get_bill_status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('read-only tool executed inline', () => {",
+                  "  pm.expect(body.tool).to.eql('get_bill_status');",
+                  "  pm.expect(body.executed).to.eql(true);",
+                  "  pm.expect(body.confirmationRequired).to.eql(false);",
+                  "});",
+                  "pm.test('two shares are still open', () => pm.expect(body.result.outstanding.count).to.eql(2));",
+                  "pm.test('755.00 THB outstanding', () => pm.expect(body.result.outstanding.amountMinor).to.eql(75500));",
+                  "pm.test('totals are in minor units', () => pm.expect(body.result.totals.totalMinor).to.eql(120000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"get_bill_status\",\n  \"args\": {\n    \"bill_id\": \"{{billId}}\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "send_reminder — challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('nothing was sent yet', () => {",
+                  "  pm.expect(body.executed).to.eql(false);",
+                  "  pm.expect(body.confirmationRequired).to.eql(true);",
+                  "});",
+                  "pm.test('a confirmation token came back', () => pm.expect(body.confirmToken).to.be.a('string').and.not.empty);",
+                  "pm.test('the reply asks for permission', () => pm.expect(body.reply).to.include('Confirm'));",
+                  "pm.collectionVariables.set('reminderToken', body.confirmToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"send_reminder\",\n  \"args\": {\n    \"share_id\": \"{{chaiShareId}}\",\n    \"tone\": \"firm\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "send_reminder — confirmed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the reminder was sent', () => {",
+                  "  pm.expect(body.executed).to.eql(true);",
+                  "  pm.expect(body.confirmationRequired).to.eql(false);",
+                  "});",
+                  "pm.test('it went to Chai in the firm tone', () => {",
+                  "  pm.expect(body.result.tone).to.eql('firm');",
+                  "  pm.expect(body.result.message).to.include('Chai');",
+                  "});",
+                  "pm.test('a sent_at timestamp is returned', () => pm.expect(body.result.sent_at).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"send_reminder\",\n  \"args\": {\n    \"share_id\": \"{{chaiShareId}}\",\n    \"tone\": \"firm\"\n  },\n  \"confirmToken\": \"{{reminderToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "PayPal webhook — settle Ben's demo order",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A fresh event id each run keeps the dedupe table from swallowing the delivery.",
+                  "pm.collectionVariables.set('webhookEventId', `evt-demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('PayPal got a 2xx', () => pm.expect(body.ok).to.eql(true));",
+                  "pm.test('the capture settled Ben', () => pm.expect(body.settled).to.be.an('object'));",
+                  "pm.test('the share is now paid', () => pm.expect(body.settled.status).to.eql('paid'));",
+                  "pm.test('Ben earned Globie as rank 2', () => pm.expect(body.settled.pointsAwarded).to.eql(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{webhookEventId}}\",\n  \"event_type\": \"PAYMENT.CAPTURE.COMPLETED\",\n  \"resource_type\": \"capture\",\n  \"resource\": {\n    \"id\": \"DEMO-CAPTURE-BEN\",\n    \"status\": \"COMPLETED\",\n    \"amount\": {\n      \"currency_code\": \"THB\",\n      \"value\": \"{{benAmount}}\"\n    },\n    \"supplementary_data\": {\n      \"related_ids\": {\n        \"order_id\": \"DEMO-BEN-ORDER\"\n      }\n    }\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/paypal/webhook",
+            "auth": { "type": "noauth" },
+            "description": "Development accepts unverified deliveries (`verified = false` is audited). The amount is recomputed in minor units and must equal the share exactly, otherwise the webhook answers `{ ok: true, ignored: 'amount_mismatch' }` and moves no money."
+          }
+        },
+        {
+          "name": "award_points — challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the challenge blocks the write', () => {",
+                  "  pm.expect(body.executed).to.eql(false);",
+                  "  pm.expect(body.confirmationRequired).to.eql(true);",
+                  "});",
+                  "pm.collectionVariables.set('awardToken', body.confirmToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"award_points\",\n  \"args\": {\n    \"agreement_id\": \"{{agreementId}}\",\n    \"share_id\": \"{{benShareId}}\",\n    \"reason\": \"globie\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "award_points — confirmed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the award executed', () => pm.expect(body.executed).to.eql(true));",
+                  "pm.test('Globie landed on Ben', () => {",
+                  "  // 5 on the first run (rank 2), 0 on a replay because the award is unique.",
+                  "  pm.expect([0, 5]).to.include(body.result.delta);",
+                  "  pm.expect(body.result.balance).to.be.at.least(5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"award_points\",\n  \"args\": {\n    \"agreement_id\": \"{{agreementId}}\",\n    \"share_id\": \"{{benShareId}}\",\n    \"reason\": \"globie\"\n  },\n  \"confirmToken\": \"{{awardToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 · Full create flow (needs VISION_API_KEY)",
+      "description": "Creates a brand new group so the seeded agreement does not collide (`409 agreement_active`). Everything up to `PATCH /bills/:id/allocations` runs without credentials; the parse step only produces line items when `VISION_API_KEY` is configured — otherwise the bill falls back to `UPLOADED` with a warning and the allocation step answers `409 bill_empty`.\n\nSet `receiptPath` to a photo of a real receipt before running, and give the request an explicit file path in the body tab if Postman cannot resolve the variable.",
+      "item": [
+        {
+          "name": "Create a fresh group",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 or 200', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('invite code allocated', () => pm.expect(body.group.inviteToken).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('newGroupId', body.group.id);",
+                  "pm.collectionVariables.set('newInviteToken', body.group.inviteToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Globie smoke {{$timestamp}}\",\n  \"currency\": \"THB\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Join — Ben (new group)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"{{newInviteToken}}\",\n  \"displayName\": \"Ben\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups/join",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{benToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Join — Chai (new group)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"{{newInviteToken}}\",\n  \"displayName\": \"Chai\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/groups/join",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{chaiToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Open the agreement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('agreement is pending acceptance', () => pm.expect(body.agreement.status).to.eql('pending'));",
+                  "pm.test('the caller fronts it', () => pm.expect(body.agreement.createdBy).to.be.a('string'));",
+                  "pm.collectionVariables.set('newAgreementId', body.agreement.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{newGroupId}}\",\n  \"estimatedTotalMinor\": 50000,\n  \"currency\": \"THB\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agreements",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Accept — Ana",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/agreements/{{newAgreementId}}/accept",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Accept — Ben",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/agreements/{{newAgreementId}}/accept",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{benToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Accept — Chai",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('everyone agreed — the agreement is accepted', () => pm.expect(body.agreement.status).to.eql('accepted'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/agreements/{{newAgreementId}}/accept",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{chaiToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Create the bill",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('bill starts as UPLOADED', () => pm.expect(body.bill.status).to.eql('UPLOADED'));",
+                  "pm.collectionVariables.set('newBillId', body.bill.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agreementId\": \"{{newAgreementId}}\",\n  \"currency\": \"THB\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/bills",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Upload the receipt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('media stored', () => pm.expect(body.status).to.eql('stored'));",
+                  "pm.collectionVariables.set('newMediaId', body.mediaId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "kind", "value": "photo", "type": "text" },
+                { "key": "file", "type": "file", "src": "{{receiptPath}}" }
+              ]
+            },
+            "url": "{{baseUrl}}/bills/{{newBillId}}/media",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            },
+            "description": "The file part must be named `file`; `kind` is optional and inferred from the MIME type. 25 MB limit, one file per request."
+          }
+        },
+        {
+          "name": "Parse the receipt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('extraction started or already done', () => pm.expect(body.status).to.be.oneOf(['PARSING', 'PARSED']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/bills/{{newBillId}}/parse",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            },
+            "description": "Returns before the vision call finishes. Without `VISION_API_KEY` the extractor produces no draft and the bill drops back to `UPLOADED` with a warning."
+          }
+        },
+        {
+          "name": "Read the bill and build the split",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const items = body.bill.items || [];",
+                  "pm.test('the receipt produced line items', () => {",
+                  "  pm.expect(items.length, 'no items — set VISION_API_KEY and upload a real receipt photo').to.be.above(0);",
+                  "});",
+                  "// Put every line on Ana so one member can confirm the whole bill.",
+                  "const memberId = pm.collectionVariables.get('anaMemberId');",
+                  "const allocations = items.map((item) => ({ billItemId: item.id, memberId, qty: 1 }));",
+                  "pm.collectionVariables.set('newAllocationBody', JSON.stringify({ allocations }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bills/{{newBillId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Allocate every line to Ana",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('each line has a proposed allocation', () => pm.expect(body.allocations.length).to.be.above(0));",
+                  "pm.test('nothing is confirmed yet', () => {",
+                  "  body.allocations.forEach((row) => pm.expect(row.status).to.eql('proposed'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{{newAllocationBody}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/bills/{{newBillId}}/allocations",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            },
+            "description": "Replaces every allocation on the bill. Each line is split with largest-remainder allocation, so no satang is invented or lost."
+          }
+        },
+        {
+          "name": "Finalize the bill",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Members confirm their own lines; all lines are Ana's here, so confirm",
+                  "// every still-proposed allocation with her token before locking the bill.",
+                  "const base = pm.variables.get('baseUrl');",
+                  "const token = pm.collectionVariables.get('anaToken');",
+                  "const billId = pm.collectionVariables.get('newBillId');",
+                  "const auth = { Authorization: `Bearer ${token}` };",
+                  "",
+                  "const bill = await pm.sendRequest({ url: `${base}/bills/${billId}`, method: 'GET', header: auth });",
+                  "const proposed = (bill.json().allocations || []).filter((row) => row.status === 'proposed');",
+                  "for (const row of proposed) {",
+                  "  await pm.sendRequest({ url: `${base}/allocations/${row.id}/confirm`, method: 'POST', header: auth });",
+                  "}",
+                  "console.log(`confirmed ${proposed.length} proposed line(s) before finalize`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('shares exist', () => pm.expect(body.shares.length).to.be.above(0));",
+                  "pm.test('shares add up to the bill total', () => {",
+                  "  const sum = body.shares.reduce((total, share) => total + share.amountMinor, 0);",
+                  "  pm.expect(sum).to.eql(body.bill.totalMinor);",
+                  "});",
+                  "pm.test('the bill is locked for collection', () => pm.expect(body.bill.status).to.eql('COLLECTING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/bills/{{newBillId}}/finalize",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            },
+            "description": "Any rounding gap lands on the agreement's fronter (Ana). A negative gap is refused with 409 totals_mismatch."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 · PayPal sandbox (optional)",
+      "description": "Real money movement against PayPal sandbox. Skipped by default — each request needs `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` and a public `PUBLIC_ORIGIN`. Without them the API answers 409 `paypal_not_configured` and changes nothing.",
+      "item": [
+        {
+          "name": "create_payment_request — challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the challenge blocks the PayPal call', () => {",
+                  "  pm.expect(body.executed).to.eql(false);",
+                  "  pm.expect(body.confirmationRequired).to.eql(true);",
+                  "});",
+                  "pm.collectionVariables.set('paymentToken', body.confirmToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"create_payment_request\",\n  \"args\": {\n    \"bill_id\": \"{{billId}}\",\n    \"share_id\": \"{{chaiShareId}}\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "create_payment_request — confirmed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('PayPal order created', () => {",
+                  "  pm.expect(body.executed).to.eql(true);",
+                  "  pm.expect(body.result.paypal_order_id).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.result.approve_url).to.include('paypal.com');",
+                  "});",
+                  "pm.collectionVariables.set('chaiOrderId', body.result.paypal_order_id);",
+                  "pm.collectionVariables.set('chaiApproveUrl', body.result.approve_url);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool\": \"create_payment_request\",\n  \"args\": {\n    \"bill_id\": \"{{billId}}\",\n    \"share_id\": \"{{chaiShareId}}\"\n  },\n  \"confirmToken\": \"{{paymentToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/agent/message",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            }
+          }
+        },
+        {
+          "name": "Capture Chai's share",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the share is paid', () => pm.expect(body.status).to.eql('paid'));",
+                  "pm.test('Globie was awarded', () => pm.expect(body.pointsAwarded).to.be.at.least(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/shares/{{chaiShareId}}/capture",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{chaiToken}}", "type": "string" }]
+            },
+            "description": "Chai must approve the order at `{{chaiApproveUrl}}` first. Capture is idempotent: an already-paid share answers `alreadyPaid: true`."
+          }
+        },
+        {
+          "name": "Request payments for the new bill",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('one PayPal request per unpaid share', () => {",
+                  "  pm.expect(body.requests).to.be.an('array').with.length.above(0);",
+                  "  body.requests.forEach((row) => pm.expect(row.approveUrl).to.include('paypal.com'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/bills/{{newBillId}}/request-payments",
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{anaToken}}", "type": "string" }]
+            },
+            "description": "Only valid for a FINALIZED bill whose shares add up to the total. The PayPal order names the fronter as payee, so a fronter without a PayPal email answers 409 fronter_paypal_missing."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "inviteToken", "value": "KHAOSI" },
+    { "key": "receiptPath", "value": "" },
+    { "key": "handoffCode", "value": "" }
+  ]
+}

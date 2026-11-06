@@ -1,0 +1,2 @@
+# Kept in git so the proxy mount has somewhere to point; drop *.conf files here
+# (see ../proxy/https.conf.example) to add the TLS server block.

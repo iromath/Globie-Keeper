@@ -1,0 +1,17 @@
+# Build context for both images (docker compose build api / web).
+node_modules
+server/node_modules
+server/dist
+.expo
+dist
+web-dist
+*.log
+
+# Secrets never enter an image. .env would also inline EXPO_PUBLIC_API_URL into
+# the web bundle, pointing production at a laptop.
+.env
+.env.*
+!.env.example
+
+.git
+.github

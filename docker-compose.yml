@@ -1,0 +1,93 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-globie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-globie}
+      POSTGRES_DB: ${POSTGRES_DB:-globie}
+    ports:
+      # Loopback only: the API reaches Postgres over the compose network.
+      - '127.0.0.1:${DB_PORT:-55432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-globie} -d ${POSTGRES_DB:-globie}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    image: ${API_IMAGE:-tradex367/globie-keeper-api:latest}
+    build:
+      # Root context: the image bakes db/migrations (server/Dockerfile).
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 3001
+      AUTO_MIGRATE: 'true'
+      MIGRATIONS_DIR: /app/db/migrations
+      MEDIA_DIR: /app/var/media
+      DATABASE_URL: postgres://${POSTGRES_USER:-globie}:${POSTGRES_PASSWORD:-globie}@db:5432/${POSTGRES_DB:-globie}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://keeperapi.globie.ai}
+      WEB_ORIGIN: ${WEB_ORIGIN:-https://keeper.globie.ai}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      AGENT_CONFIRMATION_SECRET: ${AGENT_CONFIRMATION_SECRET:-}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_ENV: ${PAYPAL_ENV:-sandbox}
+      PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_API_URL: ${VISION_API_URL:-https://api.deepseek.com/chat/completions}
+      VISION_MODEL: ${VISION_MODEL:-deepseek-flash}
+      # Notifications: without these the worker can only write in-app nudges.
+      NOTIFY_IN_APP: ${NOTIFY_IN_APP:-true}
+      NOTIFY_PUSH: ${NOTIFY_PUSH:-false}
+      NOTIFY_EMAIL: ${NOTIFY_EMAIL:-false}
+      NOTIFY_WHATSAPP: ${NOTIFY_WHATSAPP:-false}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: "${MAIL_FROM:-Globie <no-reply@globie.local>}"
+      EXPO_PUSH_URL: ${EXPO_PUSH_URL:-https://exp.host/--/api/v2/push/send}
+      WHATSAPP_API_URL: ${WHATSAPP_API_URL:-https://graph.facebook.com/v21.0}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_ID: ${WHATSAPP_PHONE_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Loopback only; the proxy is the public door.
+      - '127.0.0.1:${API_PORT:-3001}:3001'
+    volumes:
+      - uploads:/app/var/media
+
+  # Static Expo export, baked into the image (deploy/Dockerfile.web).
+  web:
+    image: ${WEB_IMAGE:-tradex367/globie-keeper-web:latest}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+
+  # Single-origin entrypoint: /api/* -> api, everything else -> web. In
+  # production Easypanel terminates TLS per subdomain and routes straight to the
+  # api/web services, so this proxy is only used for one-origin setups (VPS,
+  # tunnel, local prod rehearsal).
+  proxy:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - '${PROXY_PORT:-8080}:80'
+      - '${PROXY_TLS_PORT:-443}:443'
+    volumes:
+      - ./deploy/proxy/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
+      - web
+
+volumes:
+  pgdata:
+  uploads:
