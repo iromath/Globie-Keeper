@@ -42,6 +42,38 @@ const COPY: Record<NotificationChannel, { title: string; body: string }> = {
   },
 };
 
+/**
+ * Why a promised channel cannot fire for this member, in the member's terms.
+ * `available` means the server can deliver at all; push also needs a device and
+ * an Expo project, so a browser can never satisfy it.
+ */
+function channelBody(channel: NotificationChannel, available: boolean): string {
+  if (available) return COPY[channel].body;
+  switch (channel) {
+    case 'push':
+      return pushSupported()
+        ? 'This build is not linked to an Expo project yet, so push cannot be delivered.'
+        : 'Browsers cannot receive push. Your reminders wait in Activity.';
+    case 'email':
+      return 'Globie is not sending email yet. Your reminders wait in Activity.';
+    case 'whatsapp':
+      return 'Globie is not sending WhatsApp yet. Your reminders wait in Activity.';
+    case 'in_app':
+      return 'In-app reminders are switched off on this server.';
+  }
+}
+
+/** The reason the "Turn on push" button cannot be pressed here. */
+function pushBlockedReason(): string | null {
+  if (!pushSupported()) {
+    return 'This is the web build, which cannot receive push. Globie keeps your reminders in Activity.';
+  }
+  if (!hasPushTarget()) {
+    return 'This build is not linked to an Expo project yet, so it cannot register for push.';
+  }
+  return null;
+}
+
 function pushNotice(outcome: PushOutcome): string {
   switch (outcome.status) {
     case 'registered':
@@ -76,6 +108,9 @@ export default function SettingsScreen() {
   const savedMerchant = profile.data?.paypalMerchantId ?? '';
   const merchantValue = merchantDraft ?? savedMerchant;
   const merchantDirty = merchantDraft !== null && merchantDraft.trim() !== savedMerchant;
+
+  const canPush = pushSupported() && hasPushTarget();
+  const blockedPush = pushBlockedReason();
 
   async function savePaypal() {
     const next = (paypalDraft ?? '').trim();
@@ -222,7 +257,7 @@ export default function SettingsScreen() {
                   <View style={styles.copy}>
                     <Text variant="label">{copy.title}</Text>
                     <Text variant="caption" tone="dim">
-                      {row.available ? copy.body : 'Not set up on this server yet.'}
+                      {channelBody(row.channel, row.available)}
                     </Text>
                   </View>
                   <Switch
@@ -231,7 +266,7 @@ export default function SettingsScreen() {
                     disabled={!row.available || update.isPending}
                     onValueChange={(next) => update.mutate({ channel: row.channel, enabled: next })}
                     trackColor={{ false: colors.surfaceHi, true: colors.accentDeep }}
-                    thumbColor={row.enabled ? colors.accent : colors.mutedDim}
+                    thumbColor={row.enabled && row.available ? colors.accent : colors.mutedDim}
                   />
                 </View>
               );
@@ -263,14 +298,21 @@ export default function SettingsScreen() {
             </Text>
           </View>
         ) : (
-          <Button
-            title="Turn on push"
-            icon={icon.bell}
-            variant="secondary"
-            onPress={enablePush}
-            loading={asking}
-            disabled={!pushSupported() || !hasPushTarget()}
-          />
+          <>
+            <Button
+              title="Turn on push"
+              icon={icon.bell}
+              variant="secondary"
+              onPress={enablePush}
+              loading={asking}
+              disabled={!canPush}
+            />
+            {blockedPush ? (
+              <Text variant="caption" tone="dim">
+                {blockedPush}
+              </Text>
+            ) : null}
+          </>
         )}
         {notice ? (
           <Text variant="caption" tone="muted" accessibilityLiveRegion="polite">
