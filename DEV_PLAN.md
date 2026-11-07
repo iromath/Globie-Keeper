@@ -462,7 +462,7 @@ award_points(agreement_id, share_id, reason) -> { delta, balance }
 | Mechanic | Rule | Anti-gaming |
 |---|---|---|
 | **Hero** | Awarded to members who front cash for an agreement. Leaderboard 1st place = largest total fronted in the group over 30 days; tie-break = earliest acceptance | Only counts settled agreements; self-dealing excluded; refunds reverse the award |
-| **Globie** | Non-transferable in-app points. First member to reimburse after requests are sent: 10; second: 5; third: 3; everyone else: 1 | Only reimbursements to another member count; one award per share; unique `(agreement_id, member_id, reason)`; cap 50/day; refunds reverse |
+| **Globie** | Non-transferable in-app points. Fronting an agreement pays a flat 5, once per agreement, at the first finalize. Reimbursing another member: first 10; second 5; third 3; everyone else 1 | Only reimbursements to another member count; one award per share (and one fronting award per agreement); unique `(agreement_id, member_id, reason)`; cap 50/day; refunds reverse reimbursement awards |
 | **Leaderboard** | Rolling 30 days, per group: Hero totals, Globie balance, repayment speed, reliability | Computed from append-only `points_events` and `member_repayment_1d` |
 
 **Legal copy in-app:** "Globie points are a non-transferable engagement reward with no cash value and no redemption guarantee." Do not call them crypto tokens.

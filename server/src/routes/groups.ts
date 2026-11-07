@@ -369,7 +369,12 @@ export const groupRoutes: FastifyPluginAsync = async (app) => {
          left join lateral (
            select avg(extract(epoch from (s.paid_at - s.created_at)) / 3600.0) as avg_hours
              from shares s
+             join bills b on b.id = s.bill_id
+             join agreements a on a.id = b.agreement_id
             where s.member_id = m.id
+              -- The person who fronted a bill has nothing to repay on it, so their
+              -- own share would otherwise read as an instant 0h repayment.
+              and a.fronted_by <> m.id
               and s.paid_at is not null
               and s.paid_at > now() - interval '30 days'
          ) repaid on true

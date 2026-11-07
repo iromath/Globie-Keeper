@@ -139,6 +139,14 @@ async function rollUpBill(
   return { billSettled: true };
 }
 
+/**
+ * Fronting cash is the act the whole product is built around, so it pays Globie
+ * as well as the Hero seat. Flat and once per agreement: the reward is for the
+ * outing, not the receipt count, and it is well below a first-place repayment.
+ */
+const FRONT_GLOBIE = 5;
+const FRONT_GLOBIE_REASON = 'fronted';
+
 export type GlobieAwardInput = {
   agreementId: string;
   groupId: string;
@@ -225,6 +233,23 @@ export async function awardGlobie(
   );
 
   return { delta, rank, balance: balanceRows[0]?.balance ?? 0 };
+}
+
+/**
+ * Award the flat fronting reward the first time a bill is finalized. Keyed on
+ * (agreement, member, 'fronted'), so finalizing a second bill in the same
+ * agreement is a no-op.
+ */
+export async function awardFrontedGlobie(
+  tx: Db,
+  input: { agreementId: string; groupId: string; memberId: string },
+): Promise<GlobieAward> {
+  return awardGlobie(tx, {
+    ...input,
+    shareId: null,
+    reason: FRONT_GLOBIE_REASON,
+    amount: FRONT_GLOBIE,
+  });
 }
 
 /**

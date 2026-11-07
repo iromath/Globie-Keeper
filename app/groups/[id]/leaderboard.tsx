@@ -29,8 +29,8 @@ export default function LeaderboardScreen() {
         </View>
         <Text variant="display">Hero board</Text>
         <Text variant="body" tone="muted">
-          Rolling 30 days. Fronting cash is the only way to the top. Paying back fast earns
-          Globie.
+          Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays a flat 5
+          Globie. The line under a name shows how fast they repay others, and that speed earns more.
         </Text>
       </View>
 
@@ -93,16 +93,27 @@ export default function LeaderboardScreen() {
                 </View>
                 <Text variant="caption" tone="muted">
                   {row.repaymentSpeedHours === null
-                    ? 'No repayments yet'
-                    : `Pays back in about ${Math.round(row.repaymentSpeedHours)}h`}
+                    ? row.frontedMinor > 0
+                      ? 'Fronted the bill'
+                      : 'No repayments yet'
+                    : `Repays others in ~${Math.round(row.repaymentSpeedHours)}h`}
                 </Text>
               </View>
               <View style={styles.right}>
-                <Text variant="mono">{money.format(row.frontedMinor, currency)}</Text>
+                {row.frontedMinor > 0 ? (
+                  <Text variant="mono">{money.format(row.frontedMinor, currency)}</Text>
+                ) : (
+                  <Text variant="mono" tone="muted">
+                    —
+                  </Text>
+                )}
                 <View style={styles.globie}>
                   <Icon name={icon.sparkles} size={11} color={colors.accent} />
                   <Text variant="caption" tone="accent">
                     {row.globieBalance}
+                  </Text>
+                  <Text variant="caption" tone="muted">
+                    Globie
                   </Text>
                 </View>
               </View>

@@ -31,7 +31,7 @@ import {
     type AllocationRow,
     type BillRow,
 } from '../lib/serialize.js';
-import { reconcileShare } from '../lib/settlement.js';
+import { awardFrontedGlobie, reconcileShare } from '../lib/settlement.js';
 import { asRecord, currencyCode, pathUuid, requiredUuid } from '../lib/validate.js';
 
 type BillParams = { Params: { id: string } };
@@ -552,6 +552,14 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         [billId],
       );
 
+      // Fronting is the act the product is built around, so it pays Globie
+      // too. Idempotent per agreement: only the first finalize lands an award.
+      const fronted = await awardFrontedGlobie(tx, {
+        agreementId: ctx.agreementId,
+        groupId: ctx.groupId,
+        memberId: fronterId,
+      });
+
       await recordEvent(tx, {
         groupId: ctx.groupId,
         agreementId: ctx.agreementId,
@@ -560,7 +568,10 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         amountMinor: current.bill.total,
         currency,
         actor: ctx.member.displayName,
-        summary: `${ctx.member.displayName} locked the split — ${rows.length} shares ready`,
+        summary:
+          fronted.delta > 0
+            ? `${ctx.member.displayName} locked the split — ${rows.length} shares ready, +${fronted.delta} Globie for fronting`
+            : `${ctx.member.displayName} locked the split — ${rows.length} shares ready`,
       });
     });
 
