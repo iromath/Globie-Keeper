@@ -29,8 +29,9 @@ export default function LeaderboardScreen() {
         </View>
         <Text variant="display">Hero board</Text>
         <Text variant="body" tone="muted">
-          Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays a flat 5
-          Globie. The line under a name shows how fast they repay others, and that speed earns more.
+          Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays the biggest
+          Globie award in the group. The line under a name shows how fast they repay others, and that
+          speed earns Globie too.
         </Text>
       </View>
 

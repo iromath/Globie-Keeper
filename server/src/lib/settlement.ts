@@ -141,10 +141,12 @@ async function rollUpBill(
 
 /**
  * Fronting cash is the act the whole product is built around, so it pays Globie
- * as well as the Hero seat. Flat and once per agreement: the reward is for the
- * outing, not the receipt count, and it is well below a first-place repayment.
+ * as well as the Hero seat — and it has to pay more than any repayment, or the
+ * person who actually handed the merchant the money ends the outing behind the
+ * people who simply paid them back. Flat and once per agreement: the reward is
+ * for the outing, not the receipt count. Must stay above `GLOBIE_BY_RANK[0]`.
  */
-const FRONT_GLOBIE = 5;
+const FRONT_GLOBIE = 15;
 const FRONT_GLOBIE_REASON = 'fronted';
 
 export type GlobieAwardInput = {
