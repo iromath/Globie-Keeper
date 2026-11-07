@@ -26,14 +26,26 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (session) headers.Authorization = `Bearer ${session.token}`;
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-    headers,
-    body:
-      options.formData ??
-      (options.body === undefined ? undefined : JSON.stringify(options.body)),
-    signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
+      headers,
+      body:
+        options.formData ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
+      signal: options.signal,
+    });
+  } catch {
+    // A dropped connection, a proxy timeout or an error page without CORS
+    // headers all reach us as the browser's own "Failed to fetch". Say
+    // something the member can act on instead of echoing that.
+    throw new ApiError(
+      0,
+      'network_error',
+      'Could not reach Globie Keeper — check your connection and try again.'
+    );
+  }
 
   const text = await response.text();
   const payload = text ? safeJson(text) : null;

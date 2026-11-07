@@ -15,6 +15,7 @@ import { Screen } from '@/components/ui/screen';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import { colors, radius, space } from '@/components/ui/theme';
+import { ApiError } from '@/lib/api';
 import { useMoney } from '@/lib/money-context';
 import { useCaptureShare, useMyPoints, useMyShares } from '@/lib/queries';
 import type { Share } from '@/lib/types';
@@ -30,7 +31,7 @@ export default function MySharesScreen() {
 
   const [paying, setPaying] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   const all = shares.data?.shares ?? [];
   const currency = shares.data?.currency ?? 'THB';
@@ -75,7 +76,7 @@ export default function MySharesScreen() {
             }
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not confirm the payment');
+      setError(cause instanceof Error ? cause : new Error('Could not confirm the payment'));
     } finally {
       setPaying(null);
     }
@@ -128,11 +129,13 @@ export default function MySharesScreen() {
           <View style={styles.errorHead}>
             <Icon name={icon.warning} size={16} color={colors.danger} />
             <Text variant="label" tone="danger">
-              The payment did not go through
+              {error instanceof ApiError && error.code === 'network_error'
+                ? 'Could not reach Globie Keeper'
+                : 'The payment did not go through'}
             </Text>
           </View>
           <Text variant="caption" tone="danger">
-            {error}
+            {error.message}
           </Text>
         </View>
       ) : null}
