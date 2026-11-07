@@ -18,6 +18,7 @@ import {
     useNotificationSettings,
     useUpdateNotificationChannel,
     useUpdatePaypalEmail,
+    useUpdatePaypalMerchantId,
     type NotificationChannel,
 } from '@/lib/queries';
 
@@ -61,14 +62,20 @@ export default function SettingsScreen() {
   const update = useUpdateNotificationChannel();
   const profile = useMyProfile();
   const updatePaypal = useUpdatePaypalEmail();
+  const updateMerchant = useUpdatePaypalMerchantId();
   const client = useQueryClient();
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [paypalDraft, setPaypalDraft] = useState<string | null>(null);
+  const [merchantDraft, setMerchantDraft] = useState<string | null>(null);
 
   const savedPaypal = profile.data?.paypalEmail ?? '';
   const paypalValue = paypalDraft ?? savedPaypal;
   const paypalDirty = paypalDraft !== null && paypalDraft.trim() !== savedPaypal;
+
+  const savedMerchant = profile.data?.paypalMerchantId ?? '';
+  const merchantValue = merchantDraft ?? savedMerchant;
+  const merchantDirty = merchantDraft !== null && merchantDraft.trim() !== savedMerchant;
 
   async function savePaypal() {
     const next = (paypalDraft ?? '').trim();
@@ -77,6 +84,16 @@ export default function SettingsScreen() {
       setPaypalDraft(null);
     } catch {
       // The mutation error renders under the field; keep the draft for a retry.
+    }
+  }
+
+  async function saveMerchant() {
+    const next = (merchantDraft ?? '').trim();
+    try {
+      await updateMerchant.mutateAsync(next === '' ? null : next);
+      setMerchantDraft(null);
+    } catch {
+      // Same as above: the error stays attached to the field.
     }
   }
 
@@ -100,7 +117,7 @@ export default function SettingsScreen() {
         <SectionHeading
           glyph={icon.paypal}
           title="Getting paid"
-          hint="You settle the bill however you like — cash, card, PromptPay. Members send their share back here."
+          hint="Reimbursements only land in a PayPal Business account that can receive payments. Add that account's email, plus its merchant ID if you have one."
         />
         {profile.isLoading ? (
           <Skeleton height={76} />
@@ -110,8 +127,8 @@ export default function SettingsScreen() {
               label="PayPal email"
               hint={
                 savedPaypal
-                  ? 'Reimbursements settle straight into this PayPal account. Globie never holds the money.'
-                  : 'Members cannot reimburse you until this is set.'
+                  ? 'Must belong to a PayPal Business account that accepts payments. Globie never holds the money.'
+                  : 'Members cannot reimburse you until a Business PayPal account is set.'
               }
               value={paypalValue}
               onChangeText={setPaypalDraft}
@@ -135,6 +152,31 @@ export default function SettingsScreen() {
               onPress={() => void savePaypal()}
               loading={updatePaypal.isPending}
               disabled={!paypalDirty}
+              style={styles.inline}
+            />
+            <Field
+              label="PayPal merchant ID"
+              hint="Optional. When set, payments address this account directly instead of the email."
+              value={merchantValue}
+              onChangeText={setMerchantDraft}
+              placeholder="Merchant account ID"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (merchantDirty) void saveMerchant();
+              }}
+              editable={!updateMerchant.isPending}
+              error={updateMerchant.error ? updateMerchant.error.message : undefined}
+            />
+            <Button
+              title="Save merchant ID"
+              icon={icon.check}
+              variant="secondary"
+              compact
+              onPress={() => void saveMerchant()}
+              loading={updateMerchant.isPending}
+              disabled={!merchantDirty}
               style={styles.inline}
             />
           </>

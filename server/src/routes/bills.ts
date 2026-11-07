@@ -603,10 +603,32 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
-    const outstanding = shares.filter(
-      (row) => row.status === 'proposed' || row.status === 'failed',
-    );
+    // A checkout the member abandoned — or one PayPal refused at its own page —
+    // never comes back to us, so a `requested` share can be dead while the row
+    // still reads "Payment requested". Re-read those orders before deciding what
+    // is outstanding, and hand back the links that are already live so pressing
+    // the button again reopens them instead of doing nothing.
+    const outstanding: typeof shares = [];
     const requests: { shareId: string; approveUrl: string }[] = [];
+
+    for (const share of shares) {
+      if (share.status === 'proposed' || share.status === 'failed') {
+        outstanding.push(share);
+        continue;
+      }
+      if (share.status !== 'requested') continue;
+
+      const state = await reconcileShare(share);
+      // PayPal already holds an approval we can capture; a second order would
+      // let the member pay twice instead of finishing the first one.
+      if (state.canFinish) continue;
+      if (state.status === 'failed') {
+        outstanding.push({ ...share, status: 'failed' });
+      } else if (share.paypal_approve_url) {
+        requests.push({ shareId: share.id, approveUrl: share.paypal_approve_url });
+      }
+    }
+
     const currency = bill.currency.trim();
 
     for (const share of outstanding) {

@@ -91,6 +91,8 @@ export type MyProfile = {
   paypalLinked: boolean;
   /** Where members reimburse this member when they front a bill. */
   paypalEmail: string | null;
+  /** Preferred payee when set: the Business account's merchant id. */
+  paypalMerchantId: string | null;
 };
 
 export function useMyProfile(enabled = true) {
@@ -125,6 +127,22 @@ export function useUpdatePaypalEmail() {
       request<{ userId: string; paypalEmail: string | null }>('/me', {
         method: 'PATCH',
         body: { paypalEmail },
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
+  });
+}
+
+/**
+ * The account-level id PayPal can address instead of an email. Preferred when
+ * set: a Business account needs it to receive a cross-border reimbursement.
+ */
+export function useUpdatePaypalMerchantId() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (paypalMerchantId: string | null) =>
+      request<{ userId: string; paypalMerchantId: string | null }>('/me', {
+        method: 'PATCH',
+        body: { paypalMerchantId },
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
   });
@@ -285,8 +303,12 @@ export function useUploadMedia() {
         formData: form,
       });
     },
-    onSuccess: (_data, vars) =>
-      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
+      // Re-requesting can revive a dead checkout, so the member's own list must
+      // stop showing the old approve link too.
+      client.invalidateQueries({ queryKey: queryKeys.myShares });
+    },
   });
 }
 
@@ -387,8 +409,12 @@ export function useRequestPayments() {
         `/bills/${billId}/request-payments`,
         { body: {} }
       ),
-    onSuccess: (_data, vars) =>
-      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
+      // Re-requesting can revive a dead checkout, so the member's own list must
+      // stop showing the old approve link too.
+      client.invalidateQueries({ queryKey: queryKeys.myShares });
+    },
   });
 }
 

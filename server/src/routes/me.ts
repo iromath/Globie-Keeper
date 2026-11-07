@@ -5,7 +5,13 @@ import { ApiError } from '../lib/http-error.js';
 import { channelEnabled, FALLBACK_ORDER, type Channel } from '../lib/notify.js';
 import { mapSettledRate, mapShare, type ShareRow } from '../lib/serialize.js';
 import { reconcileShare } from '../lib/settlement.js';
-import { asRecord, currencyCode, optionalEmail, requiredString } from '../lib/validate.js';
+import {
+    asRecord,
+    currencyCode,
+    optionalEmail,
+    optionalMerchantId,
+    requiredString,
+} from '../lib/validate.js';
 import { requireUser } from '../plugins/auth.js';
 
 type ActivityRow = {
@@ -79,11 +85,15 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       display_currency: string | null;
       paypal_payer_id: string | null;
       paypal_email: string | null;
+      paypal_merchant_id: string | null;
     }>(
       `select u.display_currency, u.paypal_payer_id,
               (select max(m.paypal_email)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_email
+                where m.user_id = u.id and m.status <> 'removed') as paypal_email,
+              (select max(m.paypal_merchant_id)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -98,6 +108,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       displayCurrency: row?.display_currency?.trim() ?? null,
       paypalLinked: Boolean(row?.paypal_payer_id),
       paypalEmail: row?.paypal_email?.trim() ?? null,
+      paypalMerchantId: row?.paypal_merchant_id?.trim() ?? null,
     };
   });
 
@@ -106,8 +117,9 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
    * never what is stored or charged. `null` clears the override, so the client
    * falls back to the device or group currency.
    *
-   * `paypalEmail` is where members reimburse the fronter, so it is written to
-   * every active membership — that is what `requestPaymentForShare` reads.
+   * `paypalEmail` and `paypalMerchantId` say where members reimburse the
+   * fronter, so both are written to every active membership — that is what
+   * `requestPaymentForShare` reads. The merchant id wins when both are set.
    */
   app.patch('/me', async (request) => {
     const auth = requireUser(request);
@@ -136,14 +148,28 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
+    if ('paypalMerchantId' in body) {
+      const paypalMerchantId = optionalMerchantId(body, 'paypalMerchantId');
+
+      await query(
+        `update members set paypal_merchant_id = $2
+          where user_id = $1 and status <> 'removed'`,
+        [auth.userId, paypalMerchantId],
+      );
+    }
+
     const { rows } = await query<{
       display_currency: string | null;
       paypal_email: string | null;
+      paypal_merchant_id: string | null;
     }>(
       `select u.display_currency,
               (select max(m.paypal_email)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_email
+                where m.user_id = u.id and m.status <> 'removed') as paypal_email,
+              (select max(m.paypal_merchant_id)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -153,6 +179,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       userId: auth.userId,
       displayCurrency: rows[0]?.display_currency?.trim() ?? null,
       paypalEmail: rows[0]?.paypal_email?.trim() ?? null,
+      paypalMerchantId: rows[0]?.paypal_merchant_id?.trim() ?? null,
     };
   });
 

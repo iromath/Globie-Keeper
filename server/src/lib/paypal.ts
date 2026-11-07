@@ -109,8 +109,11 @@ export type OrderTarget = { kind: 'share' | 'tip'; id: string };
 /**
  * Who receives the money. The fronter already paid the merchant outside PayPal,
  * so reimbursements settle straight into their account; Globie never holds it.
+ *
+ * `merchantId` wins when set: a PayPal Business account can be addressed by its
+ * merchant id, while an email only works for an account that accepts payments.
  */
-export type Payee = { email: string };
+export type Payee = { email: string | null; merchantId?: string | null };
 
 /**
  * One order per target. The target id doubles as the idempotency key so a retry
@@ -133,6 +136,22 @@ export async function createOrder(input: {
   requestId?: string;
 }): Promise<{ id: string; approveUrl: string }> {
   const token = await accessToken();
+
+  // A merchant id addresses the account itself, which is what a Business
+  // account needs for a cross-border reimbursement; email is the fallback.
+  const payee = input.payee.merchantId
+    ? { merchant_id: input.payee.merchantId }
+    : input.payee.email
+      ? { email_address: input.payee.email }
+      : null;
+
+  if (!payee) {
+    throw new ApiError(
+      502,
+      'paypal_order_failed',
+      'A payee email or merchant id is required',
+    );
+  }
 
   const response = await fetch(`${apiBase()}/v2/checkout/orders`, {
     method: 'POST',
@@ -159,7 +178,7 @@ export async function createOrder(input: {
           },
           // Created with our credentials, settled to the payee: the capture moves
           // money from the payer straight to the fronter.
-          payee: { email_address: input.payee.email },
+          payee,
         },
       ],
       // `application_context` is the legacy slot; with a `payment_source` present

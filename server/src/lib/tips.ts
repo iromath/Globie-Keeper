@@ -131,15 +131,37 @@ export async function requestTip(
 
   // The tip settles into the fronter's own account, so it needs their address
   // before any tip row or order exists.
-  const { rows: payeeRows } = await query<{ paypal_email: string | null }>(
-    `select paypal_email from members where id = $1`,
-    [input.toMemberId],
+  const { rows: payeeRows } = await query<{
+    paypal_email: string | null;
+    paypal_merchant_id: string | null;
+    payer_paypal_email: string | null;
+  }>(
+    `select m.paypal_email, m.paypal_merchant_id,
+            (select u.paypal_email
+               from members pm
+               join users u on u.id = pm.user_id
+              where pm.id = $2) as payer_paypal_email
+       from members m
+      where m.id = $1`,
+    [input.toMemberId, input.fromMember.id],
   );
-  const payeeEmail = payeeRows[0]?.paypal_email?.trim();
-  if (!payeeEmail) {
+  const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
+  const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
+  const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
+
+  if (!payeeEmail && !payeeMerchantId) {
     throw ApiError.conflict(
       'fronter_paypal_missing',
       `${input.toMemberName} must add their PayPal email before you can tip them`,
+    );
+  }
+
+  // PayPal refuses a transfer from an account to itself, and a tip to
+  // yourself is not a tip.
+  if (payerEmail && payeeEmail && payerEmail === payeeEmail.toLowerCase()) {
+    throw ApiError.conflict(
+      'self_payment',
+      'You cannot tip yourself — that money is already yours',
     );
   }
 
@@ -241,7 +263,7 @@ export async function requestTip(
     description: `Globie Keeper — tip for ${input.toMemberName}${
       input.merchant ? ` · ${input.merchant}` : ''
     }`,
-    payee: { email: payeeEmail },
+    payee: { email: payeeEmail, merchantId: payeeMerchantId },
     requestId: reuseOfDeadOrder
       ? `globie-tip-${tipId}-${randomUUID()}`
       : undefined,

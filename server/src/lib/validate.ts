@@ -3,6 +3,8 @@ import { ApiError } from './http-error.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CURRENCY = /^[A-Z]{3}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** "Merchant account ID" from the PayPal dashboard: alphanumeric, 13 in practice. */
+const MERCHANT_ID = /^[A-Za-z0-9]{6,32}$/;
 
 export function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -100,6 +102,26 @@ export function optionalEmail(
     throw ApiError.badRequest(`invalid_${key}`, `${key} must be an email address`);
   }
   return value.trim().toLowerCase();
+}
+
+/**
+ * PayPal addresses the account by merchant id when it has one, which is what a
+ * Business account needs to take a cross-border reimbursement. Stored verbatim:
+ * unlike an email, the id is case-sensitive.
+ */
+export function optionalMerchantId(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !MERCHANT_ID.test(value.trim())) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be a PayPal merchant id`,
+    );
+  }
+  return value.trim();
 }
 
 export function optionalDate(

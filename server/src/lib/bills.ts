@@ -323,14 +323,24 @@ export async function requestPaymentForShare(input: {
     );
   }
 
-  const { rows: payeeRows } = await query<{ paypal_email: string | null }>(
-    `select m.paypal_email
+  const { rows: payeeRows } = await query<{
+    paypal_email: string | null;
+    paypal_merchant_id: string | null;
+    payer_paypal_email: string | null;
+  }>(
+    `select m.paypal_email, m.paypal_merchant_id,
+            (select u.paypal_email
+               from members pm
+               join users u on u.id = pm.user_id
+              where pm.id = $2) as payer_paypal_email
        from agreements a
        join members m on m.id = a.fronted_by
       where a.id = $1`,
-    [input.agreementId],
+    [input.agreementId, share.member_id],
   );
-  const payeeEmail = payeeRows[0]?.paypal_email?.trim();
+  const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
+  const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
+  const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
 
   if (['paid', 'settled', 'refunded'].includes(share.status)) {
     throw ApiError.conflict(
@@ -349,10 +359,19 @@ export async function requestPaymentForShare(input: {
     };
   }
 
-  if (!payeeEmail) {
+  if (!payeeEmail && !payeeMerchantId) {
     throw ApiError.conflict(
       'fronter_paypal_missing',
       'The person who fronted this bill must add their PayPal email before members can reimburse them',
+    );
+  }
+
+  // The capture would move money from a member to themselves, which PayPal
+  // refuses — and the member already covered this bill anyway.
+  if (payerEmail && payeeEmail && payerEmail === payeeEmail.toLowerCase()) {
+    throw ApiError.conflict(
+      'self_payment',
+      'You fronted this bill, so there is nothing to reimburse yourself for',
     );
   }
 
@@ -361,7 +380,7 @@ export async function requestPaymentForShare(input: {
     amountMinor: share.amount,
     currency: input.currency,
     description: `Globie Keeper — ${share.member_name} · ${input.merchant ?? 'group bill'}`,
-    payee: { email: payeeEmail },
+    payee: { email: payeeEmail, merchantId: payeeMerchantId },
     // PayPal replays the original response for a reused request id — including
     // an order the payer already refused — so a re-request after a dead
     // checkout needs a key of its own.
