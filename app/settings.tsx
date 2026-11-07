@@ -110,7 +110,11 @@ export default function SettingsScreen() {
 
   return (
     <Screen
-      header={{ title: 'Settings', subtitle: 'Where you get paid, and where Globie nudges you.' }}
+      header={{
+        title: 'Settings',
+        subtitle: 'Where you get paid, and where Globie nudges you.',
+        back: true,
+      }}
       bottomInset={space.xl}
     >
       <Card>

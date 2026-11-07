@@ -1,4 +1,4 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -32,9 +32,13 @@ export default function JoinScreen() {
   }
 
   return (
-    <Screen>
-      <Stack.Screen options={{ title: 'Join a group' }} />
-
+    <Screen
+      header={{
+        title: 'Join a group',
+        subtitle: 'One code is all it takes to sit at the table.',
+        back: true,
+      }}
+    >
       <Card>
         <SectionHeading
           glyph={icon.qr}

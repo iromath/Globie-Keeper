@@ -1,4 +1,4 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -48,7 +48,7 @@ export default function GroupScreen() {
 
   if (group.isLoading) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={{ title: 'Group', back: true }}>
         <Skeleton height={28} width="55%" />
         <Skeleton height={124} />
         <Skeleton height={96} />
@@ -58,7 +58,7 @@ export default function GroupScreen() {
 
   if (group.error || !group.data) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={{ title: 'Group', back: true }}>
         <EmptyState
           icon={icon.warning}
           title="Group unavailable"
@@ -116,9 +116,14 @@ export default function GroupScreen() {
       : { title: 'Waiting for the receipt', glyph: icon.time };
 
   return (
-    <Screen bottomInset={space.xl}>
-      <Stack.Screen options={{ title: group.data.group.name }} />
-
+    <Screen
+      header={{
+        title: group.data.group.name,
+        subtitle: `${members.length} at the table · ${currency}`,
+        back: true,
+      }}
+      bottomInset={space.xl}
+    >
       <InviteCard group={group.data.group} memberCount={members.length} />
 
       <Card tone="alt" enter={1}>

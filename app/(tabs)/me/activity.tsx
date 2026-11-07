@@ -84,7 +84,7 @@ export default function ActivityScreen() {
         subtitle: 'Every move across your tables.',
         action: (
           <IconButton
-            name={icon.bellOutline}
+            name={icon.settingsOutline}
             label="Settings"
             tone="muted"
             onPress={() => router.push('/settings')}

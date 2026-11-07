@@ -2,7 +2,7 @@
    to `.value` to drive the spring. The React Compiler's immutability rule cannot see
    that intent, so it is off for this file rather than silenced line by line. */
 /* eslint-disable react-hooks/immutability */
-import type { BottomTabBarProps } from 'expo-router/js-tabs';
+import { useRouter, type Href } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -10,55 +10,83 @@ import Animated, {
     useSharedValue,
     withSpring,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useActivitySeenAt } from '@/lib/activity-seen';
+import { useMyActivity } from '@/lib/queries';
 
 import { haptics } from './haptics';
 import { Icon, icon, type IconName } from './icon';
 import { Text } from './text';
 import { colors, maxContentWidth, motion, radius, space } from './theme';
 
+export type TabName = 'index' | 'groups' | 'me/shares' | 'me/activity';
+
 type Destination = { label: string; glyph: IconName; glyphActive: IconName };
 
 /** Four destinations, one meaning each — the bar never grows by accident. */
-const destinations: Record<string, Destination> = {
+const destinations: Record<TabName, Destination> = {
   index: { label: 'Home', glyph: icon.homeOutline, glyphActive: icon.home },
   groups: { label: 'Groups', glyph: icon.peopleOutline, glyphActive: icon.people },
   'me/shares': { label: 'Shares', glyph: icon.sharesOutline, glyphActive: icon.shares },
   'me/activity': { label: 'Activity', glyph: icon.activityOutline, glyphActive: icon.activity },
 };
 
+/** The order the four places appear in, left to right. */
+const order: TabName[] = ['index', 'groups', 'me/shares', 'me/activity'];
+
+const hrefs: Record<TabName, Href> = {
+  index: '/',
+  groups: '/groups',
+  'me/shares': '/me/shares',
+  'me/activity': '/me/activity',
+};
+
 /**
- * The bottom bar. The focused capsule is the state; the icon swap (outline to
- * filled) carries the same message without colour, so the bar still reads in
- * greyscale. Navigation goes through `navigateToTab` — this navigator hands the
- * bar a route key rather than a navigation object.
+ * Which destination a route belongs to. A detail page keeps its section lit —
+ * a bill is still Groups — while a page that belongs to no tab (Settings, the
+ * scanner) leaves the bar with nothing highlighted.
  */
-export function AppTabBar({ state, descriptors, navigateToTab, insets, badges }: BottomTabBarProps & { badges?: Record<string, boolean> }) {
+export function tabFor(pathname: string): TabName | null {
+  if (pathname === '/' || pathname === '') return 'index';
+  if (pathname.startsWith('/groups')) return 'groups';
+  if (pathname.startsWith('/me/shares')) return 'me/shares';
+  if (pathname.startsWith('/me/activity')) return 'me/activity';
+  return null;
+}
+
+/**
+ * The bottom bar. It belongs to the shell rather than to the tabs navigator, so
+ * it stays put when a bill or the Hero board is pushed on top of a tab — the
+ * four places are always one tap away. The focused capsule is the state; the
+ * icon swap (outline to filled) carries the same message without colour, so the
+ * bar still reads in greyscale.
+ */
+export function AppNavBar({ active }: { active: TabName | null }) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const activity = useMyActivity();
+  const seenAt = useActivitySeenAt();
+
+  const newest = activity.data?.events[0]?.at;
+  const unread = Boolean(newest && (!seenAt || newest > seenAt));
+
   return (
     <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
       {/* The bar spans the window; the destinations stay in the content column. */}
       <View style={styles.row}>
-        {state.routes.map((route, index) => {
-          const destination =
-            destinations[route.name] ??
-            ({
-              label: String(descriptors[route.key]?.options?.title ?? route.name),
-              glyph: icon.homeOutline,
-              glyphActive: icon.home,
-            } satisfies Destination);
-
-          return (
-            <TabItem
-              key={route.key}
-              destination={destination}
-              focused={state.index === index}
-              unread={badges?.[route.name] ?? false}
-              onPress={() => {
-                haptics.select();
-                navigateToTab(route.key);
-              }}
-            />
-          );
-        })}
+        {order.map((name) => (
+          <TabItem
+            key={name}
+            destination={destinations[name]}
+            focused={active === name}
+            unread={name === 'me/activity' && unread}
+            onPress={() => {
+              haptics.select();
+              router.navigate(hrefs[name]);
+            }}
+          />
+        ))}
       </View>
     </View>
   );

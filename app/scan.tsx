@@ -1,6 +1,6 @@
 import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { Stack, router } from 'expo-router';
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -100,8 +100,13 @@ export default function ScanScreen() {
 
   if (!permission?.granted) {
     return (
-      <Screen>
-        <Stack.Screen options={{ title: 'Scan invite' }} />
+      <Screen
+        header={{
+          title: 'Scan invite',
+          subtitle: 'Point the camera at the QR code a member sent you.',
+          back: true,
+        }}
+      >
         <Card>
           <SectionHeading
             glyph={icon.scan}
@@ -145,8 +150,6 @@ export default function ScanScreen() {
 
   return (
     <View style={styles.root}>
-      <Stack.Screen options={{ title: 'Scan invite' }} />
-
       <CameraView
         style={StyleSheet.absoluteFill}
         facing="back"
@@ -157,7 +160,21 @@ export default function ScanScreen() {
       />
 
       <View style={styles.overlay} pointerEvents="box-none">
-        <View style={styles.top}>
+        <View style={[styles.top, { paddingTop: insets.top + space.xl }]}>
+          {/* The camera fills the screen, so the way out floats over it. */}
+          <IconButton
+            name={icon.chevronBack}
+            label="Back"
+            onPress={() => router.back()}
+            style={{
+              position: 'absolute',
+              left: space.md,
+              top: insets.top + space.sm,
+              backgroundColor: colors.glass,
+              borderWidth: 1,
+              borderColor: colors.hairline,
+            }}
+          />
           <View style={styles.hint}>
             <Icon name={icon.qr} size={16} color={colors.accent} />
             <View style={styles.hintCopy}>

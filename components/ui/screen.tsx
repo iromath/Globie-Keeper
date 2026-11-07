@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Platform, StyleSheet, View, type ViewStyle } from 'react-native';
 import Animated, {
@@ -9,6 +10,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { IconButton } from './button';
+import { icon } from './icon';
 import { Text } from './text';
 import { colors, maxContentWidth, space } from './theme';
 import { enter } from './transitions';
@@ -19,6 +22,13 @@ type Header = {
   subtitle?: string;
   /** A control that rides beside the large title — a sign-out, a filter. */
   action?: ReactNode;
+  /**
+   * A pushed screen carries its own way back: the shell draws no stack header,
+   * so every screen leads with one title and one back affordance.
+   */
+  back?: boolean;
+  /** Where back goes when popping the stack is not the right exit — a callback page. */
+  onBack?: () => void;
 };
 
 type Props = {
@@ -48,6 +58,7 @@ export function Screen({
   refreshControl,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const scrollY = useSharedValue(0);
 
   const onScroll = useAnimatedScrollHandler((event) => {
@@ -65,26 +76,43 @@ export function Screen({
     <>
       {header ? (
         <Animated.View entering={enter.card} style={styles.titleBlock}>
-          <View style={styles.titleCopy}>
-            <Text variant="display">{header.title}</Text>
-            {header.subtitle ? (
-              <Text variant="body" tone="muted">
-                {header.subtitle}
-              </Text>
-            ) : null}
+          {/* The way back sits on its own row, so the large title keeps the same
+              left edge as every card under it — the column never shifts. */}
+          {header.back ? (
+            <IconButton
+              name={icon.chevronBack}
+              label="Back"
+              onPress={header.onBack ?? (() => router.back())}
+              style={styles.back}
+            />
+          ) : null}
+          <View style={styles.titleRow}>
+            <View style={styles.titleCopy}>
+              <Text variant="display">{header.title}</Text>
+              {header.subtitle ? (
+                <Text variant="body" tone="muted">
+                  {header.subtitle}
+                </Text>
+              ) : null}
+            </View>
+            {header.action}
           </View>
-          {header.action}
         </Animated.View>
       ) : null}
       {children}
     </>
   );
 
+  // The shell draws no stack header, so the status bar's height is ours to keep
+  // clear. A browser has no status bar and keeps its own, taller gutter.
+  const top = (Platform.OS === 'web' ? space.xxl : space.lg) + insets.top;
+
   const column = (
     <View
       style={[
         styles.content,
         padded && styles.padded,
+        padded && { paddingTop: top },
         { paddingBottom: insets.bottom + space.xl + bottomInset },
         style,
       ]}
@@ -109,7 +137,10 @@ export function Screen({
       </Animated.ScrollView>
 
       {header && scroll ? (
-        <Animated.View pointerEvents="none" style={[styles.bar, barStyle]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.bar, { height: 46 + insets.top, paddingTop: insets.top }, barStyle]}
+        >
           <Text variant="label" numberOfLines={1} style={styles.barTitle}>
             {header.title}
           </Text>
@@ -134,17 +165,16 @@ const styles = StyleSheet.create({
   // A browser has no status bar above the content, so the web keeps its own gutter.
   padded: {
     paddingHorizontal: Platform.OS === 'web' ? space.xl : space.lg,
-    paddingTop: Platform.OS === 'web' ? space.xxl : space.lg,
   },
-  titleBlock: {
+  titleBlock: { gap: space.xs, paddingTop: space.sm, paddingBottom: space.xs },
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: space.md,
-    paddingTop: space.sm,
-    paddingBottom: space.xs,
   },
   titleCopy: { flex: 1, gap: space.xs },
+  back: { alignSelf: 'flex-start', marginLeft: -space.sm },
   bar: {
     position: 'absolute',
     top: 0,

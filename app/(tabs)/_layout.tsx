@@ -1,20 +1,15 @@
-import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { Tabs } from 'expo-router/js-tabs';
 
-import { AppTabBar } from '@/components/ui/tab-bar';
-import { useActivitySeenAt } from '@/lib/activity-seen';
-import { useMyActivity } from '@/lib/queries';
-
 /**
- * The four places a member lives. Everything else — a bill, the Hero board —
- * is pushed on top of these, which is why this layout owns the bar and the
- * root stack screens do not. Groups earns a destination of its own: it is the
- * only stable way back into a table after the app is reopened.
+ * The four places a member lives. The bar itself is drawn by the root shell, so
+ * it stays on screen when a bill or the Hero board is pushed on top of a tab;
+ * this layout only owns which of the four is showing.
  */
 export default function TabsLayout() {
   return (
     <Tabs
-      tabBar={(props) => <Bar {...props} />}
+      // The shell's footer is the only bar: leave the navigator's own slot empty.
+      tabBar={() => null}
       screenOptions={{ headerShown: false, animation: 'shift', lazy: false }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
@@ -23,18 +18,4 @@ export default function TabsLayout() {
       <Tabs.Screen name="me/activity" options={{ title: 'Activity' }} />
     </Tabs>
   );
-}
-
-/**
- * Activity is the notification centre for every member (§2.13), so the dot
- * lives here: compared against this device's "seen" watermark rather than a
- * server-side unread flag, which the web build has no way to maintain.
- */
-function Bar(props: BottomTabBarProps) {
-  const activity = useMyActivity();
-  const seenAt = useActivitySeenAt();
-  const newest = activity.data?.events[0]?.at;
-  const unread = Boolean(newest && (!seenAt || newest > seenAt));
-
-  return <AppTabBar {...props} badges={{ 'me/activity': unread }} />;
 }

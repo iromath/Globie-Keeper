@@ -114,9 +114,18 @@ export default function PayPalReturnScreen() {
   const back = () =>
     result?.kind === 'tip' ? router.replace('/') : router.replace('/me/shares');
 
+  // One header for every state: this page replaces rather than pops, so the back
+  // control goes through `back` instead of the stack.
+  const header = {
+    title: 'Payment',
+    subtitle: 'Back from PayPal.',
+    back: true,
+    onBack: back,
+  };
+
   if (cancelled) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={header}>
         <EmptyState
           icon={icon.close}
           title="Payment cancelled"
@@ -125,7 +134,6 @@ export default function PayPalReturnScreen() {
               ? 'Nothing was charged. Your share is untouched.'
               : 'Nothing was charged. Your share is still open whenever you are ready.'
           }
-          action={<Button icon={icon.chevronBack} title="Back" onPress={back} />}
         />
       </Screen>
     );
@@ -133,14 +141,11 @@ export default function PayPalReturnScreen() {
 
   if (!shareId && !tipId) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={header}>
         <EmptyState
           icon={icon.warning}
           title="Nothing to confirm"
           body="This link has no payment attached. Open it from the bill or from My shares instead."
-          action={
-            <Button icon={icon.chevronBack} title="Back to my shares" onPress={back} />
-          }
         />
       </Screen>
     );
@@ -148,7 +153,7 @@ export default function PayPalReturnScreen() {
 
   if (error) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={header}>
         <EmptyState
           icon={icon.warning}
           title="The payment needs one more check"
@@ -177,7 +182,7 @@ export default function PayPalReturnScreen() {
   if (result) {
     const tip = result.kind === 'tip';
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={header}>
         <Card tone="accent">
           <SuccessPulse
             title={
@@ -213,7 +218,7 @@ export default function PayPalReturnScreen() {
   }
 
   return (
-    <Screen scroll={false}>
+    <Screen scroll={false} header={header}>
       <Card>
         <SectionHeading
           glyph={icon.scan}

@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -285,7 +285,7 @@ export default function BillScreen() {
 
   if (group.isLoading || (activeBillId && billQuery.isLoading)) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={{ title: 'Receipt', back: true }}>
         <Skeleton height={28} width="50%" />
         <Skeleton height={96} />
         <Skeleton height={120} />
@@ -296,7 +296,7 @@ export default function BillScreen() {
 
   if (group.error || !group.data) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={{ title: 'Receipt', back: true }}>
         <EmptyState
           icon={icon.warning}
           title="Group unavailable"
@@ -317,7 +317,7 @@ export default function BillScreen() {
 
   if (billQuery.error) {
     return (
-      <Screen scroll={false}>
+      <Screen scroll={false} header={{ title: 'Receipt', back: true }}>
         <EmptyState
           icon={icon.warning}
           title="Could not load the bill"
@@ -337,8 +337,16 @@ export default function BillScreen() {
   }
 
   return (
-    <Screen bottomInset={space.xl}>
-      <Stack.Screen options={{ title: bill?.merchant ?? 'Receipt' }} />
+    <Screen
+      header={{
+        title: bill?.merchant ?? 'Receipt',
+        subtitle: bill
+          ? `${group.data.group.name} · ${statusCopy[bill.status] ?? bill.status}`
+          : group.data.group.name,
+        back: true,
+      }}
+      bottomInset={space.xl}
+    >
 
       {error ? (
         <View accessibilityLiveRegion="polite" style={styles.errorBox}>

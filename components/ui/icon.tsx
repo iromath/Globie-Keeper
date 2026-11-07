@@ -69,6 +69,8 @@ export const icon = {
   time: 'time-outline',
   bell: 'notifications',
   bellOutline: 'notifications-outline',
+  settings: 'settings',
+  settingsOutline: 'settings-outline',
   phone: 'phone-portrait-outline',
   flame: 'flame',
   shield: 'shield-checkmark',

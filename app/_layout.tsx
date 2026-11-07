@@ -12,6 +12,7 @@ import { SignIn } from '@/components/sign-in';
 import { MascotToastProvider } from '@/components/ui/mascot-toast';
 import { Screen } from '@/components/ui/screen';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AppNavBar, tabFor } from '@/components/ui/tab-bar';
 import { Text } from '@/components/ui/text';
 import { colors, space } from '@/components/ui/theme';
 import { MoneyProvider } from '@/lib/money-context';
@@ -146,32 +147,27 @@ function Gate() {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.ink },
-        // On a wide page the header title reads better centred over the column.
-        headerTitleAlign: Platform.OS === 'web' ? 'center' : 'left',
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '600' },
-        headerShadowVisible: false,
-        headerBackButtonDisplayMode: 'minimal',
-        contentStyle: { backgroundColor: colors.ink },
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="join" options={{ title: 'Join a group' }} />
-      <Stack.Screen name="scan" options={{ title: 'Scan invite' }} />
-      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-      <Stack.Screen name="groups/[id]/index" options={{ title: 'Group' }} />
-      <Stack.Screen name="groups/[id]/bill" options={{ title: 'Bill' }} />
-      <Stack.Screen name="groups/[id]/leaderboard" options={{ title: 'Leaderboard' }} />
-      <Stack.Screen name="paypal/return" options={{ title: 'Payment' }} />
-    </Stack>
+    // The shell owns both bars: no stack header (every screen leads with its own
+    // large title) and one footer that stays put when a screen is pushed, so the
+    // four places are always one tap away.
+    <View style={styles.shell}>
+      <View style={styles.content}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.ink },
+          }}
+        />
+      </View>
+      <AppNavBar active={tabFor(pathname)} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.ink },
+  shell: { flex: 1, backgroundColor: colors.ink },
+  content: { flex: 1 },
   gate: { justifyContent: 'center', gap: space.xl },
   gateStack: { gap: space.md },
 });

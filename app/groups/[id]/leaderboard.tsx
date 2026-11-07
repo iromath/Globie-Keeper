@@ -22,18 +22,21 @@ export default function LeaderboardScreen() {
   const rows = leaderboard.data?.rows ?? [];
 
   return (
-    <Screen>
-      <View style={styles.header}>
-        <View style={styles.halo}>
-          <Icon name={icon.hero} size={28} color={colors.hero} />
-        </View>
-        <Text variant="display">Hero board</Text>
-        <Text variant="body" tone="muted">
-          Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays the biggest
-          Globie award in the group. The line under a name shows how fast they repay others, and that
-          speed earns Globie too.
-        </Text>
-      </View>
+    <Screen
+      header={{
+        title: 'Hero board',
+        subtitle:
+          'Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays the biggest Globie award in the group. The line under a name shows how fast they repay others, and that speed earns Globie too.',
+        back: true,
+        // The trophy is the screen's own mark: it rides beside the title on wide
+        // screens and above it on a phone, never floating in the body.
+        action: (
+          <View style={styles.halo}>
+            <Icon name={icon.hero} size={26} color={colors.hero} />
+          </View>
+        ),
+      }}
+    >
 
       {leaderboard.isLoading ? (
         <View style={styles.list} accessibilityElementsHidden>
@@ -132,17 +135,15 @@ export default function LeaderboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { gap: space.sm },
   halo: {
-    width: 60,
-    height: 60,
+    width: 52,
+    height: 52,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.heroWash,
     borderWidth: 1,
     borderColor: 'rgba(243, 199, 79, 0.32)',
-    marginBottom: space.xs,
   },
   list: { gap: space.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
