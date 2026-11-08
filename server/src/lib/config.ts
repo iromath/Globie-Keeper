@@ -186,7 +186,7 @@ export const config = {
    */
   mcpBaseUrl: process.env.MCP_BASE_URL ?? 'https://mcp.globie.earth/mcp',
   mcpBearerToken: process.env.MCP_BEARER_TOKEN ?? '',
-  mcpTimeoutMs: int(process.env.MCP_TIMEOUT_MS, 15_000),
+  mcpTimeoutMs: int(process.env.MCP_TIMEOUT_MS, 45_000),
 
   // --- fx ------------------------------------------------------------------
   /**
