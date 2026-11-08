@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import type { FastifyBaseLogger } from 'fastify';
 
-import { query, withTransaction } from '../db/pool.js';
+import { query, withTransaction, type Db } from '../db/pool.js';
 import { config } from './config.js';
 import { feeCoverAllowed, feeScheduleFor, grossUpMinor } from './fees.js';
 import { ApiError } from './http-error.js';
@@ -22,6 +22,7 @@ import type {
     BillRow,
     ShareRow,
 } from './serialize.js';
+import { awardFrontedGlobie } from './settlement.js';
 import type { PaymentMode } from './validate.js';
 
 /** Nothing may change a bill once it has been finalized. */
@@ -117,6 +118,184 @@ export async function loadShareById(shareId: string): Promise<ShareRow> {
   const row = rows[0];
   if (!row) throw ApiError.notFound('Share not found');
   return row;
+}
+
+export type FinalizeInput = {
+  billId: string;
+  /** Member whose tap triggered the lock; credited in the timeline. */
+  actorMemberId: string;
+  actorName: string;
+  /** Carries tax/tip/unassigned lines when the agreement names no fronter. */
+  fallbackFronterId: string;
+};
+
+export type FinalizeOutcome =
+  | { ok: true; shareCount: number; totalMinor: number }
+  | {
+      ok: false;
+      reason:
+        | 'bill_closed'
+        | 'no_allocations'
+        | 'confirmations_pending'
+        | 'totals_mismatch'
+        | 'nothing_to_collect';
+      message: string;
+    };
+
+/**
+ * Turn confirmed lines into one share per member. Runs inside the caller's
+ * transaction so the last confirmation and the shares it creates commit
+ * together — a member who confirmed every line must never be left staring at
+ * an empty Shares screen. Tax, tip, service and unassigned lines land on the
+ * fronter, so the shares always add up to the bill total.
+ */
+export async function finalizeBill(
+  db: Db,
+  input: FinalizeInput,
+): Promise<FinalizeOutcome> {
+  const { rows: billRows } = await db.query<{
+    total: number;
+    currency: string;
+    status: string;
+    agreement_id: string;
+    group_id: string;
+    fronted_by: string | null;
+    deadline: Date | null;
+  }>(
+    `select b.total, b.currency, b.status, b.agreement_id,
+            a.group_id, a.fronted_by, a.deadline
+       from bills b
+       join agreements a on a.id = b.agreement_id
+      where b.id = $1`,
+    [input.billId],
+  );
+  const bill = billRows[0];
+  if (!bill) throw ApiError.notFound('Bill not found');
+  if (LOCKED.has(bill.status)) {
+    return { ok: false, reason: 'bill_closed', message: 'This bill is closed' };
+  }
+
+  const { rows: allocations } = await db.query<{
+    member_id: string;
+    amount: number;
+    status: string;
+  }>(
+    `select al.member_id, al.amount, al.status
+       from allocations al
+       join bill_items bi on bi.id = al.bill_item_id
+      where bi.bill_id = $1`,
+    [input.billId],
+  );
+
+  if (allocations.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_allocations',
+      message: 'Assign the items before finalizing',
+    };
+  }
+
+  const pending = allocations.filter((row) => row.status === 'proposed').length;
+  if (pending > 0) {
+    return {
+      ok: false,
+      reason: 'confirmations_pending',
+      message: `${pending} line(s) still need a member's confirmation`,
+    };
+  }
+
+  const totals = new Map<string, number>();
+  for (const row of allocations) {
+    totals.set(row.member_id, (totals.get(row.member_id) ?? 0) + row.amount);
+  }
+
+  const covered = [...totals.values()].reduce((sum, value) => sum + value, 0);
+  const gap = bill.total - covered;
+  if (gap < 0) {
+    return {
+      ok: false,
+      reason: 'totals_mismatch',
+      message: 'Allocated amounts exceed the bill total',
+    };
+  }
+
+  // The fronter already handed the merchant the money for their own food, so
+  // that share is spent, not owed. Asking them to reimburse themselves would
+  // need a self-addressed PayPal order and would keep the bill open forever.
+  const fronterId = bill.fronted_by ?? input.fallbackFronterId;
+  if (gap > 0) {
+    // Rounding, tax, tip and unassigned lines are carried by the fronter.
+    totals.set(fronterId, (totals.get(fronterId) ?? 0) + gap);
+  }
+
+  const rows = [...totals.entries()].filter(([, amount]) => amount > 0);
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      reason: 'nothing_to_collect',
+      message: 'There is nothing to collect',
+    };
+  }
+
+  const sum = rows.reduce((acc, [, amount]) => acc + amount, 0);
+  if (sum !== bill.total) {
+    return {
+      ok: false,
+      reason: 'totals_mismatch',
+      message: 'The split does not add up to the bill total',
+    };
+  }
+
+  const currency = bill.currency.trim();
+  const dueAt = bill.deadline ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await db.query(`delete from shares where bill_id = $1 and status = 'proposed'`, [
+    input.billId,
+  ]);
+
+  for (const [memberId, amount] of rows) {
+    await db.query(
+      `insert into shares (bill_id, member_id, amount, currency, status, due_at)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        input.billId,
+        memberId,
+        amount,
+        currency,
+        memberId === fronterId ? 'settled' : 'proposed',
+        dueAt,
+      ],
+    );
+  }
+
+  await db.query(
+    `update bills set status = 'FINALIZED', version = version + 1 where id = $1`,
+    [input.billId],
+  );
+
+  // Fronting is the act the product is built around, so it pays Globie too.
+  // Idempotent per agreement: only the first finalize lands an award.
+  const fronted = await awardFrontedGlobie(db, {
+    agreementId: bill.agreement_id,
+    groupId: bill.group_id,
+    memberId: fronterId,
+  });
+
+  await recordEvent(db, {
+    groupId: bill.group_id,
+    agreementId: bill.agreement_id,
+    memberId: input.actorMemberId,
+    eventType: 'bill.finalized',
+    amountMinor: bill.total,
+    currency,
+    actor: input.actorName,
+    summary:
+      fronted.delta > 0
+        ? `${input.actorName} locked the split — ${rows.length} shares ready, +${fronted.delta} Globie for fronting`
+        : `${input.actorName} locked the split — ${rows.length} shares ready`,
+  });
+
+  return { ok: true, shareCount: rows.length, totalMinor: bill.total };
 }
 
 /**

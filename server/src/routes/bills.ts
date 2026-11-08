@@ -13,6 +13,7 @@ import {
 } from '../lib/access.js';
 import {
     LOCKED,
+    finalizeBill,
     loadAllocations,
     loadBill,
     loadShares,
@@ -31,7 +32,7 @@ import {
     type AllocationRow,
     type BillRow,
 } from '../lib/serialize.js';
-import { awardFrontedGlobie, reconcileShare } from '../lib/settlement.js';
+import { reconcileShare } from '../lib/settlement.js';
 import type { PaymentMode } from '../lib/validate.js';
 import { asRecord, currencyCode, pathUuid, requiredUuid } from '../lib/validate.js';
 
@@ -407,6 +408,13 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
 
     if (allocation.status !== 'confirmed') {
       await withTransaction(async (tx) => {
+        // Serialize confirmations on the bill row. Without this lock the last
+        // two taps can each read "one line still pending" and the split would
+        // never be locked.
+        await tx.query(`select id from bills where id = $1 for update`, [
+          allocation.bill_id,
+        ]);
+
         await tx.query(
           `insert into item_confirmations (allocation_id, member_id, status, confirmed_amount)
            values ($1, $2, 'confirmed', $3)`,
@@ -425,8 +433,9 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
             where bi.bill_id = $1 and al.status = 'proposed'`,
           [allocation.bill_id],
         );
+        const pending = pendingRows[0]?.pending ?? 0;
 
-        if ((pendingRows[0]?.pending ?? 0) === 0) {
+        if (pending === 0) {
           await tx.query(
             `update bills set status = 'CONFIRMED'
               where id = $1 and status in ('UPLOADED', 'PARSED', 'ALLOCATED')`,
@@ -444,6 +453,26 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
           actor: member.member.displayName,
           summary: `${member.member.displayName} confirmed their line`,
         });
+
+        if (pending === 0) {
+          // The last line is confirmed, so the split is final. Create the
+          // shares right here: nobody should have to be told to lock the bill
+          // afterwards, and a member who confirmed everything must not be left
+          // looking at an empty Shares screen.
+          const outcome = await finalizeBill(tx, {
+            billId: allocation.bill_id,
+            actorMemberId: allocation.member_id,
+            actorName: member.member.displayName,
+            fallbackFronterId: allocation.member_id,
+          });
+          if (!outcome.ok) {
+            // The bill stays CONFIRMED and the fronter can retry the split.
+            request.log.warn(
+              { billId: allocation.bill_id, reason: outcome.reason },
+              'auto-lock skipped',
+            );
+          }
+        }
       });
     }
 
@@ -451,8 +480,9 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /**
-   * Turn confirmed lines into one share per member. Tax, tip, service and any
-   * unassigned lines land on the fronter so the shares always add to the total.
+   * Turn confirmed lines into one share per member. The last confirmation
+   * already does this implicitly; the route stays for bills whose split could
+   * not be built at confirm time and for a fronter retrying by hand.
    */
   app.post<BillParams>('/bills/:id/finalize', async (request) => {
     const billId = pathUuid(request.params.id);
@@ -468,113 +498,16 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         shares: shares.map((share) => mapShare(share)),
       };
     }
-    if (LOCKED.has(current.bill.status)) {
-      throw ApiError.conflict('bill_closed', 'This bill is closed');
-    }
 
-    const allocations = await loadAllocations(billId);
-    if (allocations.length === 0) {
-      throw ApiError.conflict('no_allocations', 'Assign the items before finalizing');
-    }
-
-    const pending = allocations.filter((row) => row.status === 'proposed');
-    if (pending.length > 0) {
-      throw ApiError.conflict(
-        'confirmations_pending',
-        `${pending.length} line(s) still need a member's confirmation`,
-      );
-    }
-
-    const { rows: agreementRows } = await query<{
-      fronted_by: string | null;
-      deadline: Date | null;
-    }>(`select fronted_by, deadline from agreements where id = $1`, [ctx.agreementId]);
-    const agreement = agreementRows[0];
-    if (!agreement) throw ApiError.notFound('Agreement not found');
-
-    const totals = new Map<string, number>();
-    for (const row of allocations) {
-      totals.set(row.member_id, (totals.get(row.member_id) ?? 0) + row.amount);
-    }
-
-    const covered = [...totals.values()].reduce((sum, value) => sum + value, 0);
-    const gap = current.bill.total - covered;
-    if (gap < 0) {
-      throw ApiError.conflict(
-        'totals_mismatch',
-        'Allocated amounts exceed the bill total',
-      );
-    }
-    if (gap > 0) {
-      // Rounding, tax, tip and unassigned lines are carried by the fronter.
-      const target = agreement.fronted_by ?? ctx.member.id;
-      totals.set(target, (totals.get(target) ?? 0) + gap);
-    }
-
-    const rows = [...totals.entries()].filter(([, amount]) => amount > 0);
-    if (rows.length === 0) {
-      throw ApiError.conflict('nothing_to_collect', 'There is nothing to collect');
-    }
-
-    const sum = rows.reduce((acc, [, amount]) => acc + amount, 0);
-    if (sum !== current.bill.total) {
-      throw ApiError.conflict(
-        'totals_mismatch',
-        'The split does not add up to the bill total',
-      );
-    }
-
-    const currency = current.bill.currency.trim();
-    const dueAt =
-      agreement.deadline ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    // The fronter already handed the merchant the money for their own food, so
-    // that share is spent, not owed. Asking them to reimburse themselves would
-    // need a self-addressed PayPal order and would keep the bill open forever.
-    const fronterId = agreement.fronted_by ?? ctx.member.id;
-
-    await withTransaction(async (tx) => {
-      await tx.query(
-        `delete from shares where bill_id = $1 and status = 'proposed'`,
-        [billId],
-      );
-
-      for (const [memberId, amount] of rows) {
-        const status = memberId === fronterId ? 'settled' : 'proposed';
-        await tx.query(
-          `insert into shares (bill_id, member_id, amount, currency, status, due_at)
-           values ($1, $2, $3, $4, $5, $6)`,
-          [billId, memberId, amount, currency, status, dueAt],
-        );
-      }
-
-      await tx.query(
-        `update bills set status = 'FINALIZED', version = version + 1 where id = $1`,
-        [billId],
-      );
-
-      // Fronting is the act the product is built around, so it pays Globie
-      // too. Idempotent per agreement: only the first finalize lands an award.
-      const fronted = await awardFrontedGlobie(tx, {
-        agreementId: ctx.agreementId,
-        groupId: ctx.groupId,
-        memberId: fronterId,
-      });
-
-      await recordEvent(tx, {
-        groupId: ctx.groupId,
-        agreementId: ctx.agreementId,
-        memberId: ctx.member.id,
-        eventType: 'bill.finalized',
-        amountMinor: current.bill.total,
-        currency,
-        actor: ctx.member.displayName,
-        summary:
-          fronted.delta > 0
-            ? `${ctx.member.displayName} locked the split — ${rows.length} shares ready, +${fronted.delta} Globie for fronting`
-            : `${ctx.member.displayName} locked the split — ${rows.length} shares ready`,
-      });
-    });
+    const outcome = await withTransaction((tx) =>
+      finalizeBill(tx, {
+        billId,
+        actorMemberId: ctx.member.id,
+        actorName: ctx.member.displayName,
+        fallbackFronterId: ctx.member.id,
+      }),
+    );
+    if (!outcome.ok) throw ApiError.conflict(outcome.reason, outcome.message);
 
     const [bill, shares] = await Promise.all([loadBill(billId), loadShares(billId)]);
 

@@ -17,18 +17,17 @@ import { colors, radius, space } from '@/components/ui/theme';
 import { formatMinor, toMinor } from '@/lib/money';
 import { useMoney } from '@/lib/money-context';
 import {
-    useBill,
-    useCaptureTip,
-    useConfirmAllocation,
-    useCreateBill,
-    useFinalizeBill,
-    useGroup,
-    useParseBill,
-    useRequestPayments,
-    useRequestTip,
-    useSetAllocations,
-    useTips,
-    useUploadMedia
+  useBill,
+  useCaptureTip,
+  useConfirmAllocation,
+  useCreateBill,
+  useGroup,
+  useParseBill,
+  useRequestPayments,
+  useRequestTip,
+  useSetAllocations,
+  useTips,
+  useUploadMedia
 } from '@/lib/queries';
 
 type Assignment = Record<string, string[]>;
@@ -61,7 +60,6 @@ export default function BillScreen() {
   const parseBill = useParseBill();
   const setAllocations = useSetAllocations();
   const confirmAllocation = useConfirmAllocation();
-  const finalize = useFinalizeBill(id);
   const requestPayments = useRequestPayments();
   const requestTip = useRequestTip(activeBillId);
   const captureTip = useCaptureTip();
@@ -115,7 +113,6 @@ export default function BillScreen() {
     () => allocations.filter((a) => a.memberId === me?.id && a.status === 'proposed'),
     [allocations, me?.id]
   );
-  const pendingCount = allocations.filter((a) => a.status === 'proposed').length;
 
   async function capture(source: 'camera' | 'library') {
     setError(null);
@@ -198,20 +195,6 @@ export default function BillScreen() {
       notify({ title: 'Share confirmed', body: 'Kae Na has your tap on record.' });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not confirm');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function runFinalize() {
-    if (!bill) return;
-    setBusy('finalize');
-    setError(null);
-    try {
-      await finalize.mutateAsync({ billId: bill.id });
-      notify({ title: 'Bill locked', body: 'Nobody edits it now — time to collect.' });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not lock the bill');
     } finally {
       setBusy(null);
     }
@@ -583,22 +566,6 @@ export default function BillScreen() {
                 icon={icon.check}
                 onPress={confirmMine}
                 loading={busy === 'confirm'}
-              />
-            </Card>
-          ) : null}
-
-          {isFronter && pendingCount === 0 && allocations.length > 0 && !locked ? (
-            <Card>
-              <SectionHeading
-                glyph={icon.lock}
-                title="Lock the bill"
-                hint="Every line is confirmed. Locking turns the split into shares and starts the Globie race."
-              />
-              <Button
-                title="Lock the bill"
-                icon={icon.lock}
-                onPress={runFinalize}
-                loading={busy === 'finalize'}
               />
             </Card>
           ) : null}

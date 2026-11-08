@@ -407,21 +407,14 @@ export function useConfirmAllocation() {
       request<{ allocation: Allocation }>(`/allocations/${allocationId}/confirm`, {
         body: {},
       }),
-    onSuccess: (_data, vars) =>
-      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) }),
-  });
-}
-
-export function useFinalizeBill(groupId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ billId }: { billId: string }) =>
-      request<{ bill: Bill; shares: Share[] }>(`/bills/${billId}/finalize`, { body: {} }),
     onSuccess: (_data, vars) => {
       client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
-      client.invalidateQueries({ queryKey: queryKeys.group(groupId) });
+      // The last confirmation locks the split on the server, so the payer's
+      // own share is new too — refresh the lists that would otherwise sit on
+      // an empty "Nothing owed either way".
       client.invalidateQueries({ queryKey: queryKeys.myShares });
-      client.invalidateQueries({ queryKey: queryKeys.timeline(groupId) });
+      client.invalidateQueries({ queryKey: queryKeys.myGroups });
+      client.invalidateQueries({ queryKey: queryKeys.myActivity });
     },
   });
 }
