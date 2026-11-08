@@ -58,3 +58,8 @@ example
 /AGENTS.md
 /SUBMISSION.md
 /DEVPOST_SUBMISSION.md
+
+# local-only working artifacts, not published to GitHub
+/qa/
+/demo-video/
+/assets/devpost/
