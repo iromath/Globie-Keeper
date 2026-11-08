@@ -205,6 +205,17 @@ export default function GroupScreen() {
               ? `, due ${new Date(agreement.deadline).toLocaleDateString()}`
               : ''}
           </Text>
+          {/* The figure above is only what everyone agreed to before the receipt.
+              When the receipt lands higher, say so here, next to that number. */}
+          {bill &&
+          agreement.currency === bill.currency &&
+          bill.totalMinor > agreement.estimatedTotalMinor ? (
+            <Text variant="caption" tone="warn">
+              Bill {money.format(bill.totalMinor, bill.currency)} —{' '}
+              {money.format(bill.totalMinor - agreement.estimatedTotalMinor, bill.currency)}{' '}
+              over the agreed estimate.
+            </Text>
+          ) : null}
 
           {myAcceptanceMissing ? (
             <Button

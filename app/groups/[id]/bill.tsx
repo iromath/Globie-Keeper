@@ -84,6 +84,16 @@ export default function BillScreen() {
   const paidTips = (tips.data?.tips ?? []).filter((tip) => tip.status === 'paid');
   const myTip = tips.data?.myTip ?? null;
 
+  // The agreement figure is an estimate the group agreed to up front; the
+  // receipt can land above it. Show the gap next to the total, not in a corner.
+  const overEstimate =
+    agreement &&
+    bill &&
+    agreement.currency === bill.currency &&
+    bill.totalMinor > agreement.estimatedTotalMinor
+      ? bill.totalMinor - agreement.estimatedTotalMinor
+      : null;
+
   // The server's allocation is the truth. A tap is an overlay on top of it, and
   // the overlay dies the moment the server's version of the bill changes.
   const syncKey = `${bill?.id ?? ''}:${bill?.status ?? ''}:${allocations.length}`;
@@ -423,6 +433,32 @@ export default function BillScreen() {
                 </Text>
               </View>
             </View>
+            {overEstimate !== null && agreement ? (
+              <View
+                accessible
+                accessibilityRole="alert"
+                accessibilityLabel={`This bill is ${money.format(
+                  overEstimate,
+                  currency
+                )} more than the ${money.format(
+                  agreement.estimatedTotalMinor,
+                  agreement.currency
+                )} you agreed to.`}
+                style={styles.overEstimate}
+              >
+                <Icon name={icon.alert} size={15} color={colors.warn} />
+                <View style={styles.flex}>
+                  <Text variant="label" tone="warn">
+                    {money.format(overEstimate, currency)} more than agreed
+                  </Text>
+                  <Text variant="caption" tone="warn">
+                    You agreed to{' '}
+                    {money.format(agreement.estimatedTotalMinor, agreement.currency)}. The
+                    receipt came in at {money.format(bill.totalMinor, currency)}.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
             <Text variant="caption" tone="muted">
               {money.approximate(bill.totalMinor, currency)
                 ? `${money.formatOriginal(bill.totalMinor, currency)} · `
@@ -746,6 +782,16 @@ const styles = StyleSheet.create({
   itemCard: { gap: space.sm },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   warnRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  overEstimate: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warn,
+    backgroundColor: colors.warnWash,
+  },
   inlineAction: { alignSelf: 'flex-start' },
   errorBox: {
     gap: space.xs,
