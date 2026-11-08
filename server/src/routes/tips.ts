@@ -141,6 +141,8 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
         captureId: null,
         pointsAwarded: 0,
         settledRate: null,
+        feeMinor: ctx.feeMinor,
+        grossMinor: ctx.grossMinor ?? ctx.amount,
       };
     }
 
@@ -197,6 +199,8 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
       captureId: capture.captureId,
       pointsAwarded: result.pointsAwarded,
       settledRate: result.settledRate,
+      feeMinor: result.feeMinor,
+      grossMinor: result.grossMinor,
     };
   });
 };

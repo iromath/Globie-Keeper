@@ -16,6 +16,7 @@ import {
     queryKeys,
     useMyProfile,
     useNotificationSettings,
+    useUpdateCoverPaypalFee,
     useUpdateNotificationChannel,
     useUpdatePaypalEmail,
     useUpdatePaypalMeHandle,
@@ -120,6 +121,7 @@ export default function SettingsScreen() {
   const updateMerchant = useUpdatePaypalMerchantId();
   const updateMode = useUpdatePaypalMode();
   const updateHandle = useUpdatePaypalMeHandle();
+  const updateCover = useUpdateCoverPaypalFee();
   const client = useQueryClient();
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -136,6 +138,7 @@ export default function SettingsScreen() {
   const merchantDirty = merchantDraft !== null && merchantDraft.trim() !== savedMerchant;
 
   const mode = profile.data?.paypalMode ?? 'payee_direct';
+  const coverFee = profile.data?.coverPaypalFee ?? false;
   const savedHandle = profile.data?.paypalMeHandle ?? '';
   const handleValue = handleDraft ?? savedHandle;
   // The server strips a leading "@", so the draft is compared the same way.
@@ -349,6 +352,32 @@ export default function SettingsScreen() {
                 />
               </>
             )}
+
+            {/*
+              Opt-in fee coverage (DEV_PLAN §2.20). Deliberately off by default
+              and worded as covering a fee rather than passing one on.
+            */}
+            <View style={styles.row}>
+              <View style={styles.copy}>
+                <Text variant="label">Covers the PayPal fee</Text>
+                <Text variant="caption" tone="dim">
+                  On: a ฿1,300.00 share asks the member for ฿1,341.00, so ฿1,300.00
+                  lands with you. Off: you receive the share minus PayPal&apos;s fee.
+                  Estimate only — PayPal sets the final fee by country and currency.
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Covers the PayPal fee"
+                value={coverFee}
+                disabled={updateCover.isPending}
+                onValueChange={(next) => updateCover.mutate(next)}
+              />
+            </View>
+            {updateCover.error ? (
+              <Text variant="caption" tone="danger" accessibilityLiveRegion="polite">
+                {updateCover.error.message}
+              </Text>
+            ) : null}
           </>
         )}
       </Card>

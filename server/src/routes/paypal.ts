@@ -10,9 +10,9 @@ import { query } from '../db/pool.js';
 import { config, isProduction } from '../lib/config.js';
 import { ApiError } from '../lib/http-error.js';
 import {
-  toMinorAmount,
-  verifyWebhookSignature,
-  type WebhookHeaders,
+    toMinorAmount,
+    verifyWebhookSignature,
+    type WebhookHeaders,
 } from '../lib/paypal.js';
 import { failShare, reverseShare, settleShare } from '../lib/settlement.js';
 import { failTip, reverseTip, settleTip } from '../lib/tips.js';
@@ -43,6 +43,8 @@ type ShareLookup = {
   amount: number;
   currency: string;
   status: string;
+  /** What the payer was asked for when fee coverage was on (DEV_PLAN §2.20). */
+  gross_minor: number | null;
 };
 
 function headerValue(request: FastifyRequest, name: string): string | undefined {
@@ -66,7 +68,7 @@ async function findShare(candidates: string[]): Promise<ShareLookup | null> {
   if (ids.length === 0) return null;
 
   const { rows } = await query<ShareLookup>(
-    `select id, amount, currency, status
+    `select id, amount, currency, status, gross_minor
        from shares
       where paypal_order_id = any($1::text[])
          or paypal_capture_id = any($1::text[])
@@ -83,6 +85,7 @@ type TipLookup = {
   amount: number;
   currency: string;
   status: string;
+  gross_minor: number | null;
 };
 
 /** A tip is its own row, so it is looked up separately from the share. */
@@ -91,7 +94,7 @@ async function findTip(candidates: string[]): Promise<TipLookup | null> {
   if (ids.length === 0) return null;
 
   const { rows } = await query<TipLookup>(
-    `select id, amount, currency, status
+    `select id, amount, currency, status, gross_minor
        from tips
       where paypal_order_id = any($1::text[])
          or paypal_capture_id = any($1::text[])
@@ -173,14 +176,21 @@ export const paypalRoutes: FastifyPluginAsync = async (app) => {
 
     // PayPal echoes the amount; recompute it in minor units instead of trusting
     // the number as sent. A mismatch is a real problem, so do not move money.
-    const amountMatches = (row: { amount: number; currency: string }): boolean => {
+    // A grossed-up order (DEV_PLAN §2.20) is checked against what the payer was
+    // actually asked for, otherwise a correctly paid share looks short.
+    const amountMatches = (row: {
+      amount: number;
+      currency: string;
+      gross_minor: number | null;
+    }): boolean => {
       const currency = row.currency.trim();
       const eventCurrency = resource.amount?.currency_code?.trim();
       const eventAmount = toMinorAmount(resource.amount?.value, currency);
+      const expected = row.gross_minor ?? row.amount;
 
       return !(
         (eventCurrency && eventCurrency !== currency) ||
-        (eventAmount !== null && eventAmount !== row.amount)
+        (eventAmount !== null && eventAmount !== expected)
       );
     };
 

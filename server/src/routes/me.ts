@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 
 import { query } from '../db/pool.js';
+import { feeCoverAllowed } from '../lib/fees.js';
 import { ApiError } from '../lib/http-error.js';
 import { channelEnabled, FALLBACK_ORDER, type Channel } from '../lib/notify.js';
 import { mapSettledRate, mapShare, type ShareRow } from '../lib/serialize.js';
@@ -8,11 +9,12 @@ import { reconcileShare } from '../lib/settlement.js';
 import {
     asRecord,
     currencyCode,
+    optionalBoolean,
     optionalEmail,
     optionalMerchantId,
     optionalPaypalMeHandle,
     paymentMode,
-    requiredString,
+    requiredString
 } from '../lib/validate.js';
 import { requireUser } from '../plugins/auth.js';
 
@@ -90,6 +92,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       paypal_merchant_id: string | null;
       paypal_mode: string | null;
       paypal_me_handle: string | null;
+      cover_paypal_fee: boolean | null;
     }>(
       `select u.display_currency, u.paypal_payer_id,
               (select max(m.paypal_email)
@@ -103,7 +106,10 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
                 where m.user_id = u.id and m.status <> 'removed') as paypal_mode,
               (select max(m.paypal_me_handle)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle
+                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle,
+              (select max(m.cover_paypal_fee::int) = 1
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as cover_paypal_fee
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -121,6 +127,12 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       paypalMerchantId: row?.paypal_merchant_id?.trim() ?? null,
       paypalMode: row?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct',
       paypalMeHandle: row?.paypal_me_handle?.trim() ?? null,
+      /**
+       * DEV_PLAN §2.20. Only meaningful when the feature is permitted in this
+       * environment; a stored `true` reads as `false` while live mode refuses it,
+       * because no order will actually carry the fee.
+       */
+      coverPaypalFee: Boolean(row?.cover_paypal_fee) && feeCoverAllowed(),
     };
   });
 
@@ -154,10 +166,10 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       ]);
     }
 
-    // These four live on the membership, so a user with no group has nothing to
+    // These five live on the membership, so a user with no group has nothing to
     // write to. Say so instead of accepting the change and silently dropping it.
     if (
-      ['paypalEmail', 'paypalMerchantId', 'paypalMode', 'paypalMeHandle'].some(
+      ['paypalEmail', 'paypalMerchantId', 'paypalMode', 'paypalMeHandle', 'coverPaypalFee'].some(
         (key) => key in body,
       )
     ) {
@@ -213,12 +225,36 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
+    /**
+     * DEV_PLAN §2.20. Opt-in per fronter, off unless they ask for it. Asking is
+     * refused outright in live mode: passing PayPal's fee to the payer is a
+     * surcharge under both the US (§4.5) and Thai "No Surcharges" clauses.
+     */
+    if ('coverPaypalFee' in body) {
+      const cover = optionalBoolean(body, 'coverPaypalFee');
+
+      if (cover && !feeCoverAllowed()) {
+        throw new ApiError(
+          403,
+          'fee_cover_not_permitted',
+          "Covering the PayPal fee can't be turned on here — PayPal's user agreement for this market does not allow passing the fee to the payer.",
+        );
+      }
+
+      await query(
+        `update members set cover_paypal_fee = $2
+          where user_id = $1 and status <> 'removed'`,
+        [auth.userId, cover],
+      );
+    }
+
     const { rows } = await query<{
       display_currency: string | null;
       paypal_email: string | null;
       paypal_merchant_id: string | null;
       paypal_mode: string | null;
       paypal_me_handle: string | null;
+      cover_paypal_fee: boolean | null;
     }>(
       `select u.display_currency,
               (select max(m.paypal_email)
@@ -232,7 +268,10 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
                 where m.user_id = u.id and m.status <> 'removed') as paypal_mode,
               (select max(m.paypal_me_handle)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle
+                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle,
+              (select max(m.cover_paypal_fee::int) = 1
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as cover_paypal_fee
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -245,6 +284,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       paypalMerchantId: rows[0]?.paypal_merchant_id?.trim() ?? null,
       paypalMode: rows[0]?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct',
       paypalMeHandle: rows[0]?.paypal_me_handle?.trim() ?? null,
+      coverPaypalFee: Boolean(rows[0]?.cover_paypal_fee) && feeCoverAllowed(),
     };
   });
 
@@ -256,7 +296,8 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       `select s.id, s.bill_id, b.agreement_id, a.group_id, g.name as group_name,
               s.member_id, u.display_name as member_name, s.amount, s.currency,
               s.status, s.due_at, s.paid_at, s.created_at,
-              s.paypal_order_id, s.paypal_approve_url, s.payment_mode
+              s.paypal_order_id, s.paypal_approve_url, s.payment_mode,
+              s.fee_minor, s.gross_minor
          from shares s
          join bills b on b.id = s.bill_id
          join agreements a on a.id = b.agreement_id

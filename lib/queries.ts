@@ -99,6 +99,12 @@ export type MyProfile = {
   paypalMode: PaymentMode;
   /** PayPal.Me slug used by the `paypal_me` mode. */
   paypalMeHandle: string | null;
+  /**
+   * Opt-in fee coverage (DEV_PLAN §2.20): members are asked for the share plus
+   * an estimate of PayPal's fee, so the fronter nets the share. Off by default;
+   * the server reports `false` while live mode refuses the feature.
+   */
+  coverPaypalFee: boolean;
 };
 
 export function useMyProfile(enabled = true) {
@@ -179,6 +185,23 @@ export function useUpdatePaypalMeHandle() {
       request<{ userId: string; paypalMeHandle: string | null }>('/me', {
         method: 'PATCH',
         body: { paypalMeHandle },
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
+  });
+}
+
+/**
+ * Opt-in fee coverage (DEV_PLAN §2.20). Live mode answers
+ * `403 fee_cover_not_permitted`, because passing PayPal's fee to the payer is
+ * a surcharge under the US and Thai agreements.
+ */
+export function useUpdateCoverPaypalFee() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (coverPaypalFee: boolean) =>
+      request<{ userId: string; coverPaypalFee: boolean }>('/me', {
+        method: 'PATCH',
+        body: { coverPaypalFee },
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
   });
@@ -511,6 +534,9 @@ export type CaptureTipResult = {
   captureId: string | null;
   pointsAwarded: number;
   settledRate: SettledRate | null;
+  /** Fee snapshot (DEV_PLAN §2.20); `grossMinor` is what PayPal charged. */
+  feeMinor: number;
+  grossMinor: number;
 };
 
 /** Same eager capture as a share, but a tip never settles the bill. */

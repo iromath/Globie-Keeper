@@ -104,6 +104,12 @@ async function buildContext(
   const own = shares.find((share) => share.member_id === member.id);
   const names = [...new Set(shares.map((share) => share.member_name))];
 
+  /** Optional fee coverage (§2.20): the caller's own order may ask for more than their share. */
+  const ownCovered =
+    own && (own.fee_minor ?? 0) > 0 && own.gross_minor
+      ? { gross: own.gross_minor, fee: own.fee_minor ?? 0, net: own.amount }
+      : null;
+
   lines.push(
     '',
     'BILL',
@@ -120,6 +126,13 @@ async function buildContext(
     own
       ? `your share: ${money(own.amount)}, ${own.status}`
       : 'your share: none on this bill',
+    ...(ownCovered
+      ? [
+          `your checkout: ${money(ownCovered.gross)} at PayPal, which includes ${money(
+            ownCovered.fee,
+          )} covering the PayPal fee — the share itself stays ${money(ownCovered.net)}`,
+        ]
+      : []),
   );
 
   const paidTips = tipRows.filter((tip) => tip.status === 'paid');

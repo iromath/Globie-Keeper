@@ -62,6 +62,11 @@ export function ShareRow({
   // A share is what the member will be charged, so the canonical amount keeps
   // its place under the conversion (§2.19).
   const approx = money.approximate(share.amountMinor, share.currency);
+  // Optional fee coverage (§2.20): the order asks for a grossed-up amount, so
+  // the breakdown has to be visible before the member taps Pay.
+  const feeMinor = share.feeMinor ?? 0;
+  const grossMinor = share.grossMinor ?? null;
+  const covered = feeMinor > 0 && grossMinor !== null && grossMinor > share.amountMinor;
 
   const copy = (
     <View style={styles.copy}>
@@ -118,6 +123,16 @@ export function ShareRow({
           <Text variant="caption" tone="dim" style={styles.amountNote}>
             {money.formatOriginal(share.amountMinor, share.currency)}
           </Text>
+        ) : null}
+        {covered ? (
+          <>
+            <Text variant="caption" tone="dim" style={styles.amountNote}>
+              + {money.format(feeMinor, share.currency)} covers the PayPal fee
+            </Text>
+            <Text variant="caption" tone="muted" style={styles.amountNote}>
+              {money.format(grossMinor, share.currency)} at PayPal
+            </Text>
+          </>
         ) : null}
       </View>
       {onPay ? (

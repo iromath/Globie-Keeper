@@ -103,6 +103,14 @@ export type Share = {
    * PayPal order, `paypal_me` is a link the payer confirms by hand.
    */
   paymentMode?: PaymentMode | null;
+  /**
+   * Optional fee coverage (DEV_PLAN §2.20). `feeMinor` is what the payer was
+   * asked for on top of the share when the fronter opted in; `grossMinor` is
+   * the amount the checkout actually shows. `null` means the share was never
+   * grossed up. The share itself always stays the net.
+   */
+  feeMinor?: number;
+  grossMinor?: number | null;
   /** PayPal holds an approval we can still capture; only on a `requested` share. */
   canFinish?: boolean;
 };
@@ -131,6 +139,9 @@ export type Tip = {
   paypalOrderId?: string | null;
   /** Browser approval link; only present while the tip is `requested`. */
   approveUrl?: string | null;
+  /** Optional fee coverage (DEV_PLAN §2.20); the net stays `amountMinor`. */
+  feeMinor?: number;
+  grossMinor?: number | null;
   /** PayPal holds an approval we can still capture; only on a `requested` tip. */
   canFinish?: boolean;
 };

@@ -28,6 +28,8 @@ export type SettlementShare = {
   member_name: string;
   amount: number;
   currency: string;
+  /** Optional fee coverage snapshot (DEV_PLAN §2.20); `amount` stays the net. */
+  fee_minor: number;
   status: string;
   created_at: Date;
   paid_at: Date | null;
@@ -61,7 +63,7 @@ async function loadShare(
     `select s.id, s.bill_id, b.total as bill_total, b.status as bill_status,
             b.agreement_id, a.group_id,
             s.member_id, u.display_name as member_name,
-            s.amount, s.currency, s.status, s.created_at, s.paid_at
+            s.amount, s.currency, s.fee_minor, s.status, s.created_at, s.paid_at
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -312,11 +314,20 @@ export async function settleShare(input: SettleInput): Promise<SettleResult> {
     if (providerRef) {
       await tx.query(
         `insert into payments
-           (share_id, provider, provider_ref, amount, currency, status, raw_payload)
-         values ($1, 'paypal', $2, $3, $4, 'completed', $5::jsonb)
+           (share_id, provider, provider_ref, amount, currency, status, fee_minor, raw_payload)
+         values ($1, 'paypal', $2, $3, $4, 'completed', $5, $6::jsonb)
          on conflict (provider, provider_ref) do update
-           set status = 'completed', raw_payload = excluded.raw_payload`,
-        [share.id, providerRef, share.amount, currency, JSON.stringify(input.payload ?? {})],
+           set status = 'completed',
+               fee_minor = excluded.fee_minor,
+               raw_payload = excluded.raw_payload`,
+        [
+          share.id,
+          providerRef,
+          share.amount,
+          currency,
+          share.fee_minor,
+          JSON.stringify(input.payload ?? {}),
+        ],
       );
     }
 

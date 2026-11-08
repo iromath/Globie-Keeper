@@ -210,6 +210,9 @@ export type ShareRow = {
   paypal_approve_url?: string | null;
   /** How the fronter asked to be reimbursed when this share was requested. */
   payment_mode?: string | null;
+  /** Snapshot of optional fee coverage (DEV_PLAN §2.20); the net stays `amount`. */
+  fee_minor?: number;
+  gross_minor?: number | null;
 };
 
 export function mapShare(row: ShareRow, canFinish = false) {
@@ -241,6 +244,12 @@ export function mapShare(row: ShareRow, canFinish = false) {
     paymentMode: (row.payment_mode as 'payee_direct' | 'paypal_me' | null) ?? null,
     /** PayPal holds an approval we can still capture; only on a `requested` share. */
     canFinish,
+    /**
+     * Optional coverage: what the payer was asked for on top of the share and
+     * the total the checkout shows. `null` means no grossed-up order exists.
+     */
+    feeMinor: row.fee_minor ?? 0,
+    grossMinor: row.gross_minor ?? null,
   };
 }
 
@@ -259,6 +268,9 @@ export type TipRow = {
   paypal_approve_url?: string | null;
   paid_at: Date | null;
   created_at: Date;
+  /** Snapshot of optional fee coverage (DEV_PLAN §2.20); the net stays `amount`. */
+  fee_minor?: number;
+  gross_minor?: number | null;
 };
 
 export function mapTip(row: TipRow) {
@@ -282,5 +294,8 @@ export function mapTip(row: TipRow) {
     createdAt: iso(row.created_at),
     paypalOrderId: row.paypal_order_id ?? null,
     approveUrl: row.paypal_approve_url ?? null,
+    /** Optional coverage snapshot; `grossMinor` is null until an order exists. */
+    feeMinor: row.fee_minor ?? 0,
+    grossMinor: row.gross_minor ?? null,
   };
 }

@@ -161,6 +161,9 @@ export type TipContext = {
   paypalOrderId: string | null;
   fromMemberId: string;
   toMemberId: string;
+  /** Fee snapshot (DEV_PLAN §2.20); `gross` is what PayPal was asked for. */
+  feeMinor: number;
+  grossMinor: number | null;
   member: MemberContext;
 };
 
@@ -179,11 +182,13 @@ export async function requireTipMember(
     paypal_order_id: string | null;
     from_member_id: string;
     to_member_id: string;
+    fee_minor: number;
+    gross_minor: number | null;
     user_id: string;
   }>(
     `select t.bill_id, t.agreement_id, a.group_id, t.amount, t.currency,
             t.status, t.paypal_order_id, t.from_member_id, t.to_member_id,
-            fm.user_id
+            t.fee_minor, t.gross_minor, fm.user_id
        from tips t
        join bills b on b.id = t.bill_id
        join agreements a on a.id = t.agreement_id
@@ -211,6 +216,8 @@ export async function requireTipMember(
     paypalOrderId: row.paypal_order_id,
     fromMemberId: row.from_member_id,
     toMemberId: row.to_member_id,
+    feeMinor: row.fee_minor ?? 0,
+    grossMinor: row.gross_minor ?? null,
     member,
   };
 }

@@ -568,18 +568,17 @@ const createPaymentRequest: ToolHandler = async (request, args, confirmToken) =>
       approve_url: result.approveUrl,
       payment_mode: result.paymentMode,
       amount: result.amount,
+      fee_minor: result.feeMinor,
+      gross_amount: result.grossMinor,
       currency: result.currency,
     },
-    reply:
+    reply: `${
       result.paymentMode === 'paypal_me'
-        ? `I sent ${share.member_name} a PayPal.Me link to pay ${formatAmount(
-            result.amount,
-            result.currency,
-          )} ${result.currency} to the fronter.`
-        : `I sent ${share.member_name} a PayPal request for ${formatAmount(
-            result.amount,
-            result.currency,
-          )} ${result.currency}.`,
+        ? `I sent ${share.member_name} a PayPal.Me link to pay `
+        : `I sent ${share.member_name} a PayPal request for `
+    }${formatAmount(result.grossMinor, result.currency)} ${result.currency}${
+      result.feeMinor > 0 ? ' (includes the PayPal fee)' : ''
+    }${result.paymentMode === 'paypal_me' ? ' to the fronter.' : '.'}`,
   };
 };
 

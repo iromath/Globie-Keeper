@@ -68,6 +68,18 @@ export function pathUuid(value: unknown, key = 'id'): string {
   return value;
 }
 
+/** Strict: anything other than a JSON boolean is a client bug worth reporting. */
+export function optionalBoolean(
+  source: Record<string, unknown>,
+  key: string,
+): boolean {
+  const value = source[key];
+  if (typeof value !== 'boolean') {
+    throw ApiError.badRequest(`invalid_${key}`, `${key} must be a boolean`);
+  }
+  return value;
+}
+
 export function requiredMinor(
   source: Record<string, unknown>,
   key: string,

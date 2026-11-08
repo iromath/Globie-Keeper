@@ -11,6 +11,7 @@ import type { FastifyBaseLogger } from 'fastify';
 
 import { query, withTransaction } from '../db/pool.js';
 import { config } from './config.js';
+import { feeCoverAllowed, feeScheduleFor, grossUpMinor } from './fees.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
 import { createOrder, isPayPalConfigured, paypalMeUrl } from './paypal.js';
@@ -82,7 +83,8 @@ export async function loadShares(billId: string): Promise<ShareRow[]> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at
+            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at,
+            s.fee_minor, s.gross_minor
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -101,7 +103,8 @@ export async function loadShareById(shareId: string): Promise<ShareRow> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at
+            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at,
+            s.fee_minor, s.gross_minor
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -323,6 +326,8 @@ export async function requestPaymentForShare(input: {
   approveUrl: string | null;
   paymentMode: PaymentMode;
   amount: number;
+  feeMinor: number;
+  grossMinor: number;
   currency: string;
 }> {
   const { share } = input;
@@ -332,9 +337,11 @@ export async function requestPaymentForShare(input: {
     paypal_merchant_id: string | null;
     paypal_mode: string;
     paypal_me_handle: string | null;
+    cover_paypal_fee: boolean;
     payer_paypal_email: string | null;
   }>(
     `select m.paypal_email, m.paypal_merchant_id, m.paypal_mode, m.paypal_me_handle,
+            m.cover_paypal_fee,
             (select u.paypal_email
                from members pm
                join users u on u.id = pm.user_id
@@ -351,6 +358,18 @@ export async function requestPaymentForShare(input: {
   const payeeHandle = payeeRows[0]?.paypal_me_handle?.trim().replace(/^@/, '') ?? null;
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
 
+  /**
+   * Optional fee coverage (DEV_PLAN §2.20). The payer is asked for `gross` so
+   * the fronter nets the share. Off unless the fronter opted in, and never in
+   * live mode without PAYPAL_FEE_COVER_LIVE_ALLOWED: passing the fee on is a
+   * surcharge under both the US and Thai user agreements.
+   */
+  const coverFee = Boolean(payeeRows[0]?.cover_paypal_fee) && feeCoverAllowed();
+  const fee = coverFee
+    ? grossUpMinor(share.amount, feeScheduleFor(input.currency)) - share.amount
+    : 0;
+  const gross = share.amount + fee;
+
   if (['paid', 'settled', 'refunded'].includes(share.status)) {
     throw ApiError.conflict(
       'share_already_paid',
@@ -359,12 +378,15 @@ export async function requestPaymentForShare(input: {
   }
 
   if (share.status === 'requested' && share.paypal_approve_url) {
+    // An open checkout keeps the amount it was created with.
     return {
       shareId: share.id,
       paypalOrderId: share.paypal_order_id ?? null,
       approveUrl: share.paypal_approve_url,
       paymentMode: (share.payment_mode as PaymentMode | null) ?? payeeMode,
       amount: share.amount,
+      feeMinor: share.fee_minor ?? 0,
+      grossMinor: share.gross_minor ?? share.amount,
       currency: input.currency,
     };
   }
@@ -377,7 +399,7 @@ export async function requestPaymentForShare(input: {
       );
     }
 
-    const link = paypalMeUrl(payeeHandle, share.amount, input.currency);
+    const link = paypalMeUrl(payeeHandle, gross, input.currency);
     const providerRef = p2pRef(share.id);
 
     await withTransaction(async (tx) => {
@@ -386,25 +408,29 @@ export async function requestPaymentForShare(input: {
             set status = 'requested',
                 paypal_order_id = null,
                 paypal_approve_url = $2,
-                payment_mode = 'paypal_me'
+                payment_mode = 'paypal_me',
+                fee_minor = $3,
+                gross_minor = $4
           where id = $1 and status in ('proposed', 'failed', 'requested')`,
-        [share.id, link],
+        [share.id, link, fee, gross],
       );
       await tx.query(
         `insert into payments
-           (share_id, provider, provider_ref, amount, currency, status, raw_payload)
-         values ($1, 'paypal', $2, $3, $4, 'pending', $5::jsonb)
+           (share_id, provider, provider_ref, amount, currency, status, fee_minor, raw_payload)
+         values ($1, 'paypal', $2, $3, $4, 'pending', $5, $6::jsonb)
          on conflict (provider, provider_ref) do update
            set share_id = excluded.share_id,
                amount = excluded.amount,
                currency = excluded.currency,
                status = 'pending',
+               fee_minor = excluded.fee_minor,
                raw_payload = excluded.raw_payload`,
         [
           share.id,
           providerRef,
           share.amount,
           input.currency,
+          fee,
           JSON.stringify({ paypalMeUrl: link, handle: payeeHandle }),
         ],
       );
@@ -427,6 +453,8 @@ export async function requestPaymentForShare(input: {
       approveUrl: link,
       paymentMode: 'paypal_me',
       amount: share.amount,
+      feeMinor: fee,
+      grossMinor: gross,
       currency: input.currency,
     };
   }
@@ -456,7 +484,7 @@ export async function requestPaymentForShare(input: {
 
   const order = await createOrder({
     target: { kind: 'share', id: share.id },
-    amountMinor: share.amount,
+    amountMinor: gross,
     currency: input.currency,
     description: `Globie Keeper — ${share.member_name} · ${input.merchant ?? 'group bill'}`,
     payee: { email: payeeEmail, merchantId: payeeMerchantId },
@@ -474,25 +502,29 @@ export async function requestPaymentForShare(input: {
           set status = 'requested',
               paypal_order_id = $2,
               paypal_approve_url = $3,
-              payment_mode = 'payee_direct'
+              payment_mode = 'payee_direct',
+              fee_minor = $4,
+              gross_minor = $5
         where id = $1 and status in ('proposed', 'failed', 'requested')`,
-      [share.id, order.id, order.approveUrl],
+      [share.id, order.id, order.approveUrl, fee, gross],
     );
     await tx.query(
       `insert into payments
-         (share_id, provider, provider_ref, amount, currency, status, raw_payload)
-       values ($1, 'paypal', $2, $3, $4, 'pending', $5::jsonb)
+         (share_id, provider, provider_ref, amount, currency, status, fee_minor, raw_payload)
+       values ($1, 'paypal', $2, $3, $4, 'pending', $5, $6::jsonb)
        on conflict (provider, provider_ref) do update
          set share_id = excluded.share_id,
              amount = excluded.amount,
              currency = excluded.currency,
              status = 'pending',
+             fee_minor = excluded.fee_minor,
              raw_payload = excluded.raw_payload`,
       [
         share.id,
         order.id,
         share.amount,
         input.currency,
+        fee,
         JSON.stringify({ orderId: order.id }),
       ],
     );
@@ -515,6 +547,8 @@ export async function requestPaymentForShare(input: {
     approveUrl: order.approveUrl,
     paymentMode: 'payee_direct',
     amount: share.amount,
+    feeMinor: fee,
+    grossMinor: gross,
     currency: input.currency,
   };
 }

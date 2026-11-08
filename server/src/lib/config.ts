@@ -8,6 +8,50 @@ const int = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+type FeeScheduleConfig = { rate: number; fixedMinor: number };
+
+/**
+ * Indicative commercial fees, per currency (DEV_PLAN §2.20). The fixed part is
+ * in minor units, so THB 11.00 is `1100`. Only an estimate: the real fee also
+ * depends on payer country and whether the payment crosses a border.
+ */
+const DEFAULT_FEE_SCHEDULES: Record<string, FeeScheduleConfig> = {
+  THB: { rate: 0.0349, fixedMinor: 1100 },
+  USD: { rate: 0.0349, fixedMinor: 30 },
+};
+
+/** `{"THB":{"rate":0.0349,"fixedMinor":1100}}`; malformed entries are dropped. */
+const parseFeeSchedules = (
+  value: string | undefined,
+): Record<string, FeeScheduleConfig> => {
+  if (!value?.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object') return {};
+
+  const schedules: Record<string, FeeScheduleConfig> = {};
+  for (const [code, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { rate, fixedMinor } = entry as { rate?: unknown; fixedMinor?: unknown };
+    if (
+      typeof rate === 'number' &&
+      Number.isFinite(rate) &&
+      rate >= 0 &&
+      rate < 1 &&
+      typeof fixedMinor === 'number' &&
+      Number.isInteger(fixedMinor) &&
+      fixedMinor >= 0
+    ) {
+      schedules[code.trim().toUpperCase()] = { rate, fixedMinor };
+    }
+  }
+  return schedules;
+};
+
 /**
  * The API and the web export are served from different hostnames in
  * production (keeperapi.globie.ai / keeper.globie.ai), so "where the API lives"
@@ -96,6 +140,18 @@ export const config = {
     process.env.PAYPAL_LOGIN_WEB_RETURN_URL ?? `${webOrigin}/paypal/login`,
   paypalLoginNativeReturnUrl:
     process.env.PAYPAL_LOGIN_NATIVE_RETURN_URL ?? 'globiekeeper://auth/return',
+
+  /**
+   * Optional fee coverage (DEV_PLAN §2.20). Off by default and hard-blocked in
+   * live mode, because charging the payer PayPal's fee is a surcharge under the
+   * US (§4.5) and Thai *No Surcharges* clauses. The flag below exists so the
+   * demo can show it in sandbox and nothing else.
+   */
+  paypalFeeSchedules: {
+    ...DEFAULT_FEE_SCHEDULES,
+    ...parseFeeSchedules(process.env.PAYPAL_FEE_SCHEDULES),
+  },
+  paypalFeeCoverLiveAllowed: bool(process.env.PAYPAL_FEE_COVER_LIVE_ALLOWED, false),
 
   // --- fx ------------------------------------------------------------------
   /**

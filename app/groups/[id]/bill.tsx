@@ -645,6 +645,13 @@ export default function BillScreen() {
                       {money.format(myTip.amountMinor, currency)}
                     </Text>
                   </View>
+                  {myTip.feeMinor ? (
+                    <Text variant="caption" tone="dim">
+                      {myTip.status === 'paid' ? 'Paid' : 'PayPal asks for'}{' '}
+                      {money.format(myTip.grossMinor ?? myTip.amountMinor, currency)} —{' '}
+                      {money.format(myTip.feeMinor, currency)} covers the PayPal fee.
+                    </Text>
+                  ) : null}
                   {myTip.canFinish ? (
                     <Button
                       compact
@@ -683,6 +690,13 @@ export default function BillScreen() {
                     : 'Tips are closed for this bill.'}
                 </Text>
               )}
+
+              {tips.data.canTip ? (
+                <Text variant="caption" tone="dim">
+                  If {tips.data.frontedByName} covers the PayPal fee, PayPal asks for
+                  the tip plus an estimated fee. The amount is shown before you approve.
+                </Text>
+              ) : null}
 
               {paidTips.map((tip) => (
                 <View key={tip.id} style={styles.rowBetween}>

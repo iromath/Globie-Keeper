@@ -13,6 +13,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { query, withTransaction, type Db } from '../db/pool.js';
+import { feeCoverAllowed, feeScheduleFor, grossUpMinor } from './fees.js';
 import { extractSettledRate, type SettledRate } from './fx.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
@@ -42,6 +43,9 @@ export type TipRow = {
   paypal_approve_url: string | null;
   paid_at: Date | null;
   created_at: Date;
+  /** Optional fee coverage snapshot (DEV_PLAN §2.20); the net stays `amount`. */
+  fee_minor: number;
+  gross_minor: number | null;
 };
 
 async function loadTip(db: Db, tipId: string, lock = false): Promise<TipRow> {
@@ -51,7 +55,8 @@ async function loadTip(db: Db, tipId: string, lock = false): Promise<TipRow> {
             t.from_member_id, fu.display_name as from_member_name,
             t.to_member_id, tu.display_name as to_member_name,
             t.amount, t.currency, t.message, t.status,
-            t.paypal_order_id, t.paypal_approve_url, t.paid_at, t.created_at
+            t.paypal_order_id, t.paypal_approve_url, t.paid_at, t.created_at,
+            t.fee_minor, t.gross_minor
        from tips t
        join bills b on b.id = t.bill_id
        join agreements a on a.id = t.agreement_id
@@ -76,7 +81,8 @@ export async function listTips(billId: string): Promise<TipRow[]> {
             t.from_member_id, fu.display_name as from_member_name,
             t.to_member_id, tu.display_name as to_member_name,
             t.amount, t.currency, t.message, t.status,
-            t.paypal_order_id, t.paypal_approve_url, t.paid_at, t.created_at
+            t.paypal_order_id, t.paypal_approve_url, t.paid_at, t.created_at,
+            t.fee_minor, t.gross_minor
        from tips t
        join bills b on b.id = t.bill_id
        join agreements a on a.id = t.agreement_id
@@ -150,6 +156,9 @@ export type RequestTipResult = {
   paypalOrderId: string;
   approveUrl: string;
   amountMinor: number;
+  /** Optional fee coverage (DEV_PLAN §2.20): what the payer is asked extra. */
+  feeMinor: number;
+  grossMinor: number;
   currency: string;
   alreadyRequested: boolean;
 };
@@ -174,9 +183,10 @@ export async function requestTip(
   const { rows: payeeRows } = await query<{
     paypal_email: string | null;
     paypal_merchant_id: string | null;
+    cover_paypal_fee: boolean;
     payer_paypal_email: string | null;
   }>(
-    `select m.paypal_email, m.paypal_merchant_id,
+    `select m.paypal_email, m.paypal_merchant_id, m.cover_paypal_fee,
             (select u.paypal_email
                from members pm
                join users u on u.id = pm.user_id
@@ -188,6 +198,18 @@ export async function requestTip(
   const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
   const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
+
+  /**
+   * Optional fee coverage (DEV_PLAN §2.20). The fronter opted in, so the payer
+   * is asked for the gross and the tip nets `amountMinor`. Refused in live mode
+   * unless explicitly allowed — passing the fee on is a surcharge.
+   */
+  const coverFee = Boolean(payeeRows[0]?.cover_paypal_fee) && feeCoverAllowed();
+  const fee = coverFee
+    ? grossUpMinor(input.amountMinor, feeScheduleFor(input.currency)) -
+      input.amountMinor
+    : 0;
+  const gross = input.amountMinor + fee;
 
   if (!payeeEmail && !payeeMerchantId) {
     throw ApiError.conflict(
@@ -209,10 +231,13 @@ export async function requestTip(
     id: string;
     status: string;
     amount: number;
+    fee_minor: number;
+    gross_minor: number | null;
     paypal_order_id: string | null;
     paypal_approve_url: string | null;
   }>(
-    `select id, status, amount, paypal_order_id, paypal_approve_url
+    `select id, status, amount, fee_minor, gross_minor,
+            paypal_order_id, paypal_approve_url
        from tips where bill_id = $1 and from_member_id = $2`,
     [input.billId, input.fromMember.id],
   );
@@ -243,6 +268,8 @@ export async function requestTip(
         paypalOrderId: existing.paypal_order_id ?? '',
         approveUrl: existing.paypal_approve_url,
         amountMinor: existing.amount,
+        feeMinor: existing.fee_minor,
+        grossMinor: existing.gross_minor ?? existing.amount,
         currency: input.currency,
         alreadyRequested: true,
       };
@@ -260,7 +287,8 @@ export async function requestTip(
       `update tips
           set amount = $2, currency = $3, message = $4, status = 'proposed',
               paypal_order_id = null, paypal_capture_id = null,
-              paypal_approve_url = null, paid_at = null
+              paypal_approve_url = null, paid_at = null,
+              fee_minor = 0, gross_minor = null
         where id = $1`,
       [existing.id, input.amountMinor, input.currency, input.message],
     );
@@ -298,7 +326,7 @@ export async function requestTip(
 
   const order = await createOrder({
     target: { kind: 'tip', id: tipId },
-    amountMinor: input.amountMinor,
+    amountMinor: gross,
     currency: input.currency,
     description: `Globie Keeper — tip for ${input.toMemberName}${
       input.merchant ? ` · ${input.merchant}` : ''
@@ -314,9 +342,11 @@ export async function requestTip(
       `update tips
           set status = 'requested',
               paypal_order_id = $2,
-              paypal_approve_url = $3
+              paypal_approve_url = $3,
+              fee_minor = $4,
+              gross_minor = $5
         where id = $1 and status in ('proposed', 'failed', 'refunded')`,
-      [tipId, order.id, order.approveUrl],
+      [tipId, order.id, order.approveUrl, fee, gross],
     );
 
     await recordEvent(tx, {
@@ -338,6 +368,8 @@ export async function requestTip(
     paypalOrderId: order.id,
     approveUrl: order.approveUrl,
     amountMinor: input.amountMinor,
+    feeMinor: fee,
+    grossMinor: gross,
     currency: input.currency,
     alreadyRequested: false,
   };
@@ -357,6 +389,9 @@ export type SettleTipResult = {
   pointsAwarded: number;
   /** PayPal's own rate, when the payer's currency differed from the bill's. */
   settledRate: SettledRate | null;
+  /** Fee snapshot (DEV_PLAN §2.20); `gross` is what PayPal actually asked for. */
+  feeMinor: number;
+  grossMinor: number;
 };
 
 /**
@@ -381,7 +416,14 @@ export async function settleTip(input: SettleTipInput): Promise<SettleTipResult>
           [tip.id, input.captureId],
         );
       }
-      return { tipId: tip.id, alreadyPaid: true, pointsAwarded: 0, settledRate: null };
+      return {
+        tipId: tip.id,
+        alreadyPaid: true,
+        pointsAwarded: 0,
+        settledRate: null,
+        feeMinor: tip.fee_minor ?? 0,
+        grossMinor: tip.gross_minor ?? tip.amount,
+      };
     }
 
     const currency = tip.currency.trim();
@@ -432,6 +474,8 @@ export async function settleTip(input: SettleTipInput): Promise<SettleTipResult>
       alreadyPaid: false,
       pointsAwarded: globie.delta,
       settledRate,
+      feeMinor: tip.fee_minor ?? 0,
+      grossMinor: tip.gross_minor ?? tip.amount,
     };
   });
 }
