@@ -242,6 +242,38 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     const billId = pathUuid(request.params.id);
     const ctx = await requireBillMember(request, billId);
 
+    // Bills confirmed before the split locked itself, and any bill whose
+    // implicit lock failed, would sit at CONFIRMED with no shares forever.
+    // Heal them on read: the lock is idempotent and serialised on the bill row,
+    // so this only ever runs once per stuck bill.
+    await withTransaction(async (tx) => {
+      const { rows } = await tx.query<{ status: string }>(
+        `select status from bills where id = $1 for update`,
+        [billId],
+      );
+      const status = rows[0]?.status;
+      if (status !== 'CONFIRMED' && status !== 'ALLOCATED') return;
+
+      const { rows: pendingRows } = await tx.query<{ pending: number }>(
+        `select count(*)::int as pending
+           from allocations al
+           join bill_items bi on bi.id = al.bill_item_id
+          where bi.bill_id = $1 and al.status = 'proposed'`,
+        [billId],
+      );
+      if ((pendingRows[0]?.pending ?? 0) > 0) return;
+
+      const outcome = await finalizeBill(tx, {
+        billId,
+        actorMemberId: ctx.member.id,
+        actorName: ctx.member.displayName,
+        fallbackFronterId: ctx.member.id,
+      });
+      if (!outcome.ok) {
+        request.log.warn({ billId, reason: outcome.reason }, 'lazy lock skipped');
+      }
+    });
+
     const [bill, allocations, shares] = await Promise.all([
       loadBill(billId),
       loadAllocations(billId),
