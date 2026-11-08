@@ -16,10 +16,13 @@ import { loadBill, loadShares } from './bills.js';
 import { config } from './config.js';
 import { ApiError } from './http-error.js';
 import { formatAmount } from './paypal.js';
+import { listTips, loadFronter } from './tips.js';
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
 const SETTLED = new Set(['paid', 'settled', 'refunded']);
+/** Mirrors the tip route: a tip only makes sense once the fronter has paid. */
+const TIP_OPEN = new Set(['FINALIZED', 'COLLECTING', 'SETTLED']);
 const MAX_MESSAGE_CHARS = 600;
 const MAX_TURN_CHARS = 1_500;
 
@@ -30,7 +33,9 @@ Voice: warm, brief, plain. At most three sentences. No markdown, no bullet lists
 What the app can do (these are actions you cannot perform yourself):
 - read the receipt, split the bill across the group, ask everyone to confirm their lines
 - say who still owes, nudge a member, request a PayPal payment, award Globie points
+- take a tip for the fronter: the bill screen has a "Tip the fronter" card with preset amounts, paid straight to the fronter through PayPal and worth +2 Globie
 Only the fronter — the member who paid the merchant — can change the bill.
+Tipping is one per member, it opens once the bill is finalized, and the fronter cannot tip themselves.
 
 Rules:
 - Answer from CONTEXT only. Never invent names, amounts, statuses or dates. If something is not in CONTEXT, say you do not know.
@@ -79,7 +84,7 @@ async function buildContext(
   ];
 
   if (!billId) {
-    lines.push('', 'BILL', 'none captured yet');
+    lines.push('', 'BILL', 'none captured yet', '', 'TIPS', 'none — no bill captured yet');
     return lines.join('\n');
   }
 
@@ -87,7 +92,12 @@ async function buildContext(
   // The bill must belong to the group the client claims to be looking at.
   if (billCtx.groupId !== groupId) throw ApiError.forbidden();
 
-  const [{ bill }, shares] = await Promise.all([loadBill(billId), loadShares(billId)]);
+  const [{ bill }, shares, tipRows, fronter] = await Promise.all([
+    loadBill(billId),
+    loadShares(billId),
+    listTips(billId),
+    loadFronter(billCtx.agreementId),
+  ]);
   const currency = bill.currency.trim();
   const money = (amount: number) => `${formatAmount(amount, currency)} ${currency}`;
   const open = shares.filter((share) => !SETTLED.has(share.status));
@@ -110,6 +120,45 @@ async function buildContext(
     own
       ? `your share: ${money(own.amount)}, ${own.status}`
       : 'your share: none on this bill',
+  );
+
+  const paidTips = tipRows.filter((tip) => tip.status === 'paid');
+  const tippedTotal = paidTips.reduce((sum, tip) => sum + tip.amount, 0);
+  const myTip = tipRows.find((tip) => tip.from_member_id === member.id) ?? null;
+
+  lines.push('', 'TIPS');
+  if (!fronter.id) {
+    lines.push(
+      'fronter: not recorded',
+      'tipping: unavailable — this bill has no fronter to tip',
+    );
+  } else {
+    lines.push(`fronter: ${fronter.name}${fronter.id === member.id ? ' (you)' : ''}`);
+    if (fronter.id === member.id) {
+      lines.push(
+        'tipping: you fronted this bill, so you cannot tip yourself — the others can tip you',
+      );
+    } else if (!TIP_OPEN.has(bill.status)) {
+      lines.push(
+        `tipping: not open yet — tips open once the bill is finalized (bill status: ${bill.status})`,
+      );
+    } else {
+      lines.push(
+        'tipping: open — the "Tip the fronter" card on the bill screen offers preset amounts; it pays the fronter directly through PayPal and earns +2 Globie',
+      );
+    }
+  }
+  lines.push(
+    paidTips.length === 0
+      ? 'paid tips: none yet'
+      : `paid tips: ${paidTips.length}, ${money(tippedTotal)} in total from ${paidTips
+          .map((tip) => tip.from_member_name)
+          .join(', ')}`,
+    myTip
+      ? `your tip: ${myTip.status}${
+          myTip.status === 'paid' ? `, ${money(myTip.amount)}` : ''
+        }`
+      : 'your tip: none',
   );
 
   return lines.join('\n');

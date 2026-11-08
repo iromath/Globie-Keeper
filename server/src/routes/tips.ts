@@ -14,6 +14,7 @@ import { mapTip } from '../lib/serialize.js';
 import {
     failTip,
     listTips,
+    loadFronter,
     reconcileTip,
     requestTip,
     settleTip
@@ -30,32 +31,6 @@ const TIPPABLE = new Set(['FINALIZED', 'COLLECTING', 'SETTLED']);
 
 type BillParams = { Params: { id: string } };
 type TipParams = { Params: { id: string } };
-
-/**
- * Who fronted the agreement and what to call them. `fronted_by` is set when the
- * agreement is created; falling back to `created_by` keeps older rows tippable.
- */
-async function loadFronter(
-  agreementId: string,
-): Promise<{ id: string | null; name: string }> {
-  const { rows } = await query<{ fronted_by: string | null; fronted_name: string }>(
-    `select a.fronted_by,
-            coalesce(fu.display_name, cu.display_name) as fronted_name
-       from agreements a
-       left join members fm on fm.id = a.fronted_by
-       left join users fu on fu.id = fm.user_id
-       join members cm on cm.id = a.created_by
-       join users cu on cu.id = cm.user_id
-      where a.id = $1`,
-    [agreementId],
-  );
-
-  const row = rows[0];
-  return {
-    id: row?.fronted_by ?? null,
-    name: row?.fronted_name ?? 'the fronter',
-  };
-}
 
 export const tipRoutes: FastifyPluginAsync = async (app) => {
   app.get<BillParams>('/bills/:id/tips', async (request) => {
