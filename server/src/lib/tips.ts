@@ -115,11 +115,13 @@ export async function loadFronter(agreementId: string): Promise<{
     fronted_name: string;
     paypal_email: string | null;
     paypal_merchant_id: string | null;
+    user_paypal_email: string | null;
   }>(
     `select a.fronted_by,
             coalesce(fu.display_name, cu.display_name) as fronted_name,
             fm.paypal_email,
-            fm.paypal_merchant_id
+            fm.paypal_merchant_id,
+            fu.paypal_email as user_paypal_email
        from agreements a
        left join members fm on fm.id = a.fronted_by
        left join users fu on fu.id = fm.user_id
@@ -133,7 +135,13 @@ export async function loadFronter(agreementId: string): Promise<{
   return {
     id: row?.fronted_by ?? null,
     name: row?.fronted_name ?? 'the fronter',
-    payoutReady: Boolean(row?.paypal_email?.trim() || row?.paypal_merchant_id?.trim()),
+    // Same fallback as `requestTip`: accounts that linked PayPal before the
+    // address moved onto the membership only have it on `users`.
+    payoutReady: Boolean(
+      row?.paypal_email?.trim() ||
+        row?.paypal_merchant_id?.trim() ||
+        row?.user_paypal_email?.trim(),
+    ),
   };
 }
 
@@ -184,9 +192,13 @@ export async function requestTip(
     paypal_email: string | null;
     paypal_merchant_id: string | null;
     cover_paypal_fee: boolean;
+    user_paypal_email: string | null;
     payer_paypal_email: string | null;
   }>(
     `select m.paypal_email, m.paypal_merchant_id, m.cover_paypal_fee,
+            (select u.paypal_email
+               from users u
+              where u.id = m.user_id) as user_paypal_email,
             (select u.paypal_email
                from members pm
                join users u on u.id = pm.user_id
@@ -195,7 +207,10 @@ export async function requestTip(
       where m.id = $1`,
     [input.toMemberId, input.fromMember.id],
   );
-  const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
+  // Older accounts only carry the linked address on `users`; without the
+  // fallback a fronter who never re-saved settings can never be tipped.
+  const payeeEmail =
+    payeeRows[0]?.paypal_email?.trim() || payeeRows[0]?.user_paypal_email?.trim() || null;
   const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
 

@@ -84,7 +84,13 @@ export function ShareRow({
           ? 'PayPal.Me link sent — tap “I’ve paid” after sending'
           : share.status === 'requested' && share.canFinish
             ? 'Approved — finish the payment'
-            : statusCopy[share.status]}
+            : /* No checkout exists yet, so there is nothing to tap: say whose
+                 move it is instead of leaving the row without an explanation. */
+              share.status === 'proposed' && !onPay
+              ? `Waiting for ${share.fronterName ?? 'the person who fronted this bill'} to request payment`
+              : share.status === 'failed' && !onPay
+                ? 'Waiting for a new request from the person who fronted this bill'
+                : statusCopy[share.status]}
         {share.dueAt ? `, due ${new Date(share.dueAt).toLocaleDateString()}` : ''}
       </Text>
     </View>

@@ -102,6 +102,8 @@ export type Share = {
   billId: string;
   groupId: string;
   groupName?: string;
+  /** Who fronted the bill: the member who has to request this payment. */
+  fronterName?: string | null;
   memberId: string;
   memberName: string;
   amountMinor: number;

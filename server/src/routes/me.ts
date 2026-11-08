@@ -95,7 +95,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       cover_paypal_fee: boolean | null;
     }>(
       `select u.display_currency, u.paypal_payer_id,
-              (select max(m.paypal_email)
+              (select max(coalesce(m.paypal_email, u.paypal_email))
                  from members m
                 where m.user_id = u.id and m.status <> 'removed') as paypal_email,
               (select max(m.paypal_merchant_id)
@@ -257,7 +257,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       cover_paypal_fee: boolean | null;
     }>(
       `select u.display_currency,
-              (select max(m.paypal_email)
+              (select max(coalesce(m.paypal_email, u.paypal_email))
                  from members m
                 where m.user_id = u.id and m.status <> 'removed') as paypal_email,
               (select max(m.paypal_merchant_id)
@@ -297,13 +297,16 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
               s.member_id, u.display_name as member_name, s.amount, s.currency,
               s.status, s.due_at, s.paid_at, s.created_at,
               s.paypal_order_id, s.paypal_approve_url, s.payment_mode,
-              s.fee_minor, s.gross_minor
+              s.fee_minor, s.gross_minor,
+              fu.display_name as fronter_name
          from shares s
          join bills b on b.id = s.bill_id
          join agreements a on a.id = b.agreement_id
          join groups g on g.id = a.group_id
          join members m on m.id = s.member_id
          join users u on u.id = m.user_id
+         left join members fm on fm.id = a.fronted_by
+         left join users fu on fu.id = fm.user_id
         where m.user_id = $1
           and m.status <> 'removed'
           and s.status not in ('paid', 'settled', 'refunded')

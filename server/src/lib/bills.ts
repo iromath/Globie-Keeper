@@ -653,10 +653,14 @@ export async function requestPaymentForShare(input: {
     paypal_mode: string;
     paypal_me_handle: string | null;
     cover_paypal_fee: boolean;
+    payee_user_paypal_email: string | null;
     payer_paypal_email: string | null;
   }>(
     `select m.paypal_email, m.paypal_merchant_id, m.paypal_mode, m.paypal_me_handle,
             m.cover_paypal_fee,
+            (select u.paypal_email
+               from users u
+              where u.id = m.user_id) as payee_user_paypal_email,
             (select u.paypal_email
                from members pm
                join users u on u.id = pm.user_id
@@ -668,7 +672,16 @@ export async function requestPaymentForShare(input: {
   );
   const payeeMode: PaymentMode =
     payeeRows[0]?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct';
-  const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
+  /**
+   * The membership row is the canonical home for this, but older accounts only
+   * ever stored the address on `users` (it is what settings used to write). Fall
+   * back to it so a fronter who never re-saved gets a working request instead of
+   * `fronter_paypal_missing`.
+   */
+  const payeeEmail =
+    payeeRows[0]?.paypal_email?.trim() ||
+    payeeRows[0]?.payee_user_paypal_email?.trim() ||
+    null;
   const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
   const payeeHandle = payeeRows[0]?.paypal_me_handle?.trim().replace(/^@/, '') ?? null;
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
@@ -710,7 +723,7 @@ export async function requestPaymentForShare(input: {
     if (!payeeHandle) {
       throw ApiError.conflict(
         'fronter_paypal_missing',
-        'The person who fronted this bill must add their PayPal.Me handle before members can reimburse them',
+        'Add your PayPal.Me handle in Settings before members can reimburse you',
       );
     }
 
@@ -784,7 +797,7 @@ export async function requestPaymentForShare(input: {
   if (!payeeEmail && !payeeMerchantId) {
     throw ApiError.conflict(
       'fronter_paypal_missing',
-      'The person who fronted this bill must add their PayPal email before members can reimburse them',
+      'Add your PayPal email in Settings before members can reimburse you',
     );
   }
 

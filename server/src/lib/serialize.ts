@@ -243,6 +243,8 @@ export type ShareRow = {
   /** Snapshot of optional fee coverage (DEV_PLAN §2.20); the net stays `amount`. */
   fee_minor?: number;
   gross_minor?: number | null;
+  /** Who fronted the bill — the member who has to request the payment. */
+  fronter_name?: string | null;
 };
 
 export function mapShare(row: ShareRow, canFinish = false) {
@@ -280,6 +282,8 @@ export function mapShare(row: ShareRow, canFinish = false) {
      */
     feeMinor: row.fee_minor ?? 0,
     grossMinor: row.gross_minor ?? null,
+    /** Lets the member see whose move it is while a share is still `proposed`. */
+    fronterName: row.fronter_name?.trim() ?? null,
   };
 }
 
