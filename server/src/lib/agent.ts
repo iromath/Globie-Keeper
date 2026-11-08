@@ -3,8 +3,8 @@
  *
  * One deterministic dispatcher over the seven tools the product promises. Every
  * call is authorised against the database — never on the ids the caller claims —
- * audited to `agent_events`, and the four tools that move money or people need a
- * short-lived HMAC confirmation token issued by a previous, unconfirmed call.
+ * audited to `agent_events`, and the three tools that move money or people need
+ * a short-lived HMAC confirmation token issued by a previous, unconfirmed call.
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
@@ -13,18 +13,18 @@ import type { FastifyRequest } from 'fastify';
 
 import { query, withTransaction } from '../db/pool.js';
 import {
-    requireAgreementMember,
-    requireBillMember,
-    requireFronter,
+  requireAgreementMember,
+  requireBillMember,
+  requireFronter,
 } from './access.js';
 import {
-    LOCKED,
-    loadAllocations,
-    loadBill,
-    loadShareById,
-    loadShares,
-    requestPaymentForShare,
-    startBillParse,
+  LOCKED,
+  loadAllocations,
+  loadBill,
+  loadShareById,
+  loadShares,
+  requestPaymentForShare,
+  startBillParse,
 } from './bills.js';
 import { config, isProduction } from './config.js';
 import { ApiError } from './http-error.js';
