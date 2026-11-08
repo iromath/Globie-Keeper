@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
+import { Button } from '@/components/ui/button';
 import { Icon, icon, type IconName } from '@/components/ui/icon';
 import { BabyKaeNa } from '@/components/ui/mascot';
 import { Text } from '@/components/ui/text';
@@ -22,8 +24,12 @@ function glyphFor(type: string): IconName {
   return icon.information;
 }
 
+/** How many events stay in view before the feed asks to be expanded. */
+const LATEST_COUNT = 3;
+
 export function Timeline({ events, currency }: { events: TimelineEvent[]; currency: string }) {
   const money = useMoney();
+  const [expanded, setExpanded] = useState(false);
 
   if (events.length === 0) {
     return (
@@ -33,9 +39,26 @@ export function Timeline({ events, currency }: { events: TimelineEvent[]; curren
     );
   }
 
+  const collapsible = events.length > LATEST_COUNT;
+  // Collapsed means the newest few, so the feed still answers "what just happened".
+  const visible = collapsible && !expanded ? events.slice(-LATEST_COUNT) : events;
+
   return (
     <View style={styles.list}>
-      {events.map((event, index) => {
+      {collapsible ? (
+        <View style={styles.toggleRow}>
+          <Button
+            variant="secondary"
+            compact
+            icon={expanded ? icon.chevronUp : icon.chevronDown}
+            iconSide="right"
+            aria-expanded={expanded}
+            title={expanded ? `Show latest ${LATEST_COUNT}` : `Show all ${events.length} events`}
+            onPress={() => setExpanded((open) => !open)}
+          />
+        </View>
+      ) : null}
+      {visible.map((event, index) => {
         const system = event.type.startsWith('system.');
 
         if (system) {
@@ -113,6 +136,7 @@ function Avatar({ name }: { name: string }) {
 
 const styles = StyleSheet.create({
   list: { gap: space.md },
+  toggleRow: { alignItems: 'center' },
   row: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
   systemRow: { alignItems: 'center' },
   systemChip: {

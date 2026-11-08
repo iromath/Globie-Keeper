@@ -47,6 +47,7 @@ export const icon = {
   chevronRight: 'chevron-forward',
   chevronBack: 'chevron-back',
   chevronDown: 'chevron-down',
+  chevronUp: 'chevron-up',
   arrowForward: 'arrow-forward',
   close: 'close',
   check: 'checkmark',
