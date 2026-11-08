@@ -213,10 +213,13 @@ export default function BillScreen() {
     setError(null);
     try {
       const result = await requestPayments.mutateAsync({ billId: bill.id });
-      setApproveUrl(result.requests[0]?.approveUrl ?? null);
-      notify({ title: 'Requests sent', body: 'PayPal is nudging the crew for you.' });
-      if (result.requests[0]?.approveUrl) {
-        await WebBrowser.openBrowserAsync(result.requests[0].approveUrl);
+      const first = result.requests[0];
+      setApproveUrl(first?.approveUrl ?? null);
+      notify({ title: 'Requests sent', body: 'Each member can now pay from My shares.' });
+      // A PayPal.Me link is the fronter's own collect link; opening it here would
+      // just show their profile, so only an order checkout is worth a trip.
+      if (first?.approveUrl && first.paymentMode === 'payee_direct') {
+        await WebBrowser.openBrowserAsync(first.approveUrl);
       }
     } catch (cause) {
       setError(
@@ -569,7 +572,7 @@ export default function BillScreen() {
               <SectionHeading
                 glyph={icon.paypal}
                 title="Reimbursement"
-                hint={`${fronterName} paid the merchant. Pay your share from the My shares tab — the PayPal order names them as the payee, not Globie.`}
+                hint={`${fronterName} paid the merchant. Pay your share from the My shares tab — the money goes straight to them, never to Globie.`}
               />
             </Card>
           ) : null}
@@ -579,7 +582,7 @@ export default function BillScreen() {
               <SectionHeading
                 glyph={icon.paypal}
                 title="Request payment"
-                hint="Each member gets a PayPal order in the system browser, not an embedded webview."
+                hint="Each member gets a PayPal order or a PayPal.Me link in the system browser, not an embedded webview. Both pay the fronter direct."
               />
               <Button
                 title="Send PayPal requests"
@@ -592,7 +595,7 @@ export default function BillScreen() {
                   variant="ghost"
                   compact
                   icon={icon.link}
-                  title="Reopen checkout"
+                  title="Reopen payment link"
                   onPress={() => WebBrowser.openBrowserAsync(approveUrl)}
                   style={styles.inlineAction}
                 />

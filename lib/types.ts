@@ -98,9 +98,17 @@ export type Share = {
   paypalOrderId?: string | null;
   /** Browser approval link; the member resumes checkout from here. */
   approveUrl?: string | null;
+  /**
+   * How the fronter asked to be reimbursed: `payee_direct` finishes through a
+   * PayPal order, `paypal_me` is a link the payer confirms by hand.
+   */
+  paymentMode?: PaymentMode | null;
   /** PayPal holds an approval we can still capture; only on a `requested` share. */
   canFinish?: boolean;
 };
+
+/** The two ways a fronter can collect: an order with them as payee, or PayPal.Me. */
+export type PaymentMode = 'payee_direct' | 'paypal_me';
 
 /**
  * A voluntary extra for the person who fronted the bill (DEV_PLAN §2.18).
@@ -189,5 +197,13 @@ export type AgentResponse = {
   confirmationRequired: boolean;
   confirmToken: string | null;
   result: Record<string, unknown>;
+  reply: string;
+};
+
+/**
+ * `POST /api/agent/chat`. The conversational layer only explains and answers
+ * from the group's data; nothing on the bill changes.
+ */
+export type AgentChatResponse = {
   reply: string;
 };

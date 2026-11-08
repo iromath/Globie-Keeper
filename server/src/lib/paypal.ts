@@ -56,6 +56,28 @@ export function formatAmount(amountMinor: number, currency: string): string {
   return (amountMinor / 10 ** exponent).toFixed(exponent);
 }
 
+/**
+ * A PayPal.Me link that fixes the amount, e.g. `paypal.me/ana/12.50THB`.
+ *
+ * This is the second way to be reimbursed: it works for a Personal account,
+ * needs no order and no capture — but PayPal gives us no API to read the
+ * payment back, so the payer confirms it in Globie instead.
+ *
+ * The host is always `www.paypal.com`: a PayPal.Me page is the payee's public
+ * profile, not an API endpoint, and the sandbox does not serve real profiles.
+ */
+export function paypalMeUrl(
+  handle: string,
+  amountMinor: number,
+  currency: string,
+): string {
+  const code = currency.trim().toUpperCase();
+  return `https://www.paypal.com/paypalme/${encodeURIComponent(handle)}/${formatAmount(
+    amountMinor,
+    code,
+  )}${code}`;
+}
+
 /** Inverse of `formatAmount` for amounts arriving in a webhook payload. */
 export function toMinorAmount(value: unknown, currency: string): number | null {
   if (typeof value !== 'string' && typeof value !== 'number') return null;

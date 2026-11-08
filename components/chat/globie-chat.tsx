@@ -11,7 +11,8 @@ import { Text } from '@/components/ui/text';
 import { colors, radius, space } from '@/components/ui/theme';
 import { stagger } from '@/components/ui/transitions';
 import { formatMinor } from '@/lib/money';
-import { useAgentMessage } from '@/lib/queries';
+import { ApiError } from '@/lib/api';
+import { useAgentChat, useAgentMessage } from '@/lib/queries';
 import type {
     AgentResponse,
     AgentToolName,
@@ -21,6 +22,7 @@ import type {
 } from '@/lib/types';
 
 type Props = {
+  groupId: string;
   agreementId: string | null;
   billId: string | null;
   billStatus: string | null;
@@ -67,15 +69,22 @@ const toolCopy: Record<AgentToolName, string> = {
   award_points: 'Award Globie points',
 };
 
+/** Shown when only the deterministic tools are available (no chat model). */
+const CAPABILITIES =
+  'I can read the receipt, split the bill, ask for confirmations, tell you who still owes, nudge someone, request payment, or award Globie points.';
+
 /**
  * The conversational surface over `POST /api/agent/message` (DEV_PLAN §2.11).
  *
- * Globie is deterministic, so the composer maps a plain-language line onto one
+ * Actions stay deterministic: the composer maps a plain-language line onto one
  * of the seven tools and always shows the server's `reply`. Anything that moves
  * money or messages a member comes back as `confirmationRequired` and is only
- * replayed — with the same arguments — after the user taps Confirm.
+ * replayed — with the same arguments — after the user taps Confirm. Everything
+ * that is not an action (greetings, questions, small talk) goes to
+ * `POST /api/agent/chat`, which answers without touching the bill.
  */
 export function GlobieChat({
+  groupId,
   agreementId,
   billId,
   billStatus,
@@ -84,7 +93,8 @@ export function GlobieChat({
   isFronter,
 }: Props) {
   const agent = useAgentMessage();
-  const busy = agent.isPending;
+  const chat = useAgentChat();
+  const busy = agent.isPending || chat.isPending;
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -119,6 +129,36 @@ export function GlobieChat({
     // Derive the id from the appended position: a ref counter can restart at 0
     // while `messages` survives (Fast Refresh), which produced duplicate keys.
     setMessages((current) => [...current, { id: `m${current.length}`, from, text }]);
+  }
+
+  /**
+   * Conversation only. Anything that is not one of the seven actions — a
+   * greeting, a question, small talk — is answered by the server-side
+   * assistant against the bill context, instead of a canned capability menu.
+   * The line just typed is not replayed in `history`; the server appends it.
+   */
+  async function converse(line: string) {
+    // The seed greeting (`m0`) is dropped: it is a capability menu, and
+    // replaying it as a prior assistant turn just invites an echo of it.
+    const history = messages
+      .filter((message) => message.id !== 'm0')
+      .slice(-8)
+      .map((message) => ({
+        role: message.from === 'you' ? ('user' as const) : ('assistant' as const),
+        content: message.text,
+      }));
+    try {
+      const response = await chat.mutateAsync({ message: line, groupId, billId, history });
+      say('globie', response.reply);
+    } catch (cause) {
+      // No chat model configured: fall back to the deterministic menu rather
+      // than surfacing a configuration error to the member.
+      if (cause instanceof ApiError && cause.code === 'assistant_not_configured') {
+        say('globie', CAPABILITIES);
+        return;
+      }
+      throw cause;
+    }
   }
 
   /** One tool call; a confirmation challenge is parked until the user taps. */
@@ -280,10 +320,7 @@ export function GlobieChat({
         return;
       }
 
-      say(
-        'globie',
-        'I can read the receipt, split the bill, ask for confirmations, tell you who still owes, nudge someone, request payment, or award Globie points.'
-      );
+      await converse(line);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Globie could not do that.');
     }
@@ -475,7 +512,9 @@ function parseIntent(raw: string, members: Member[]): Intent {
   ) {
     return { kind: 'payment_request', memberHint: findMember(text, members) };
   }
-  if (/\b(points?|globie)\b/.test(text)) {
+  // "Globie" is the assistant's own name, so it cannot be a keyword here: a
+  // plain "hi globie" must reach the conversation, not award_points.
+  if (/\bpoints?\b|\baward\b/.test(text)) {
     return { kind: 'points', memberHint: findMember(text, members) };
   }
   if (/\bstatus\b|\bwho (still )?owes?\b|\boutstanding\b|\bunpaid\b|\bhow much\b/.test(text)) {

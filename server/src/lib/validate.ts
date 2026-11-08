@@ -5,6 +5,11 @@ const CURRENCY = /^[A-Z]{3}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** "Merchant account ID" from the PayPal dashboard: alphanumeric, 13 in practice. */
 const MERCHANT_ID = /^[A-Za-z0-9]{6,32}$/;
+/** The slug after `paypal.me/`: letters, digits, dot, dash or underscore. */
+const PAYPAL_ME_HANDLE = /^[A-Za-z0-9._-]{3,40}$/;
+
+/** How a fronter gets reimbursed. Chosen per member, snapshotted per share. */
+export type PaymentMode = 'payee_direct' | 'paypal_me';
 
 export function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -122,6 +127,41 @@ export function optionalMerchantId(
     );
   }
   return value.trim();
+}
+
+export function paymentMode(
+  source: Record<string, unknown>,
+  key: string,
+): PaymentMode {
+  const value = source[key];
+  if (value === 'payee_direct' || value === 'paypal_me') return value;
+  throw ApiError.badRequest(
+    `invalid_${key}`,
+    `${key} must be payee_direct or paypal_me`,
+  );
+}
+
+/**
+ * The PayPal.Me slug, stored without the leading "@" and lower case: PayPal
+ * treats handles case-insensitively, so one spelling keeps the link stable.
+ */
+export function optionalPaypalMeHandle(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    throw ApiError.badRequest(`invalid_${key}`, `${key} must be a string`);
+  }
+  const handle = value.trim().replace(/^@/, '');
+  if (!PAYPAL_ME_HANDLE.test(handle)) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be your PayPal.Me handle (3-40 letters, digits, . _ -)`,
+    );
+  }
+  return handle.toLowerCase();
 }
 
 export function optionalDate(

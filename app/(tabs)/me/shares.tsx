@@ -17,7 +17,7 @@ import { Text } from '@/components/ui/text';
 import { colors, radius, space } from '@/components/ui/theme';
 import { ApiError } from '@/lib/api';
 import { useMoney } from '@/lib/money-context';
-import { useCaptureShare, useMyPoints, useMyShares } from '@/lib/queries';
+import { useCaptureShare, useConfirmSharePaid, useMyPoints, useMyShares } from '@/lib/queries';
 import type { Share } from '@/lib/types';
 
 type Notice = { text: string; settled: boolean };
@@ -26,15 +26,44 @@ export default function MySharesScreen() {
   const shares = useMyShares();
   const points = useMyPoints();
   const capture = useCaptureShare();
+  const confirmPaid = useConfirmSharePaid();
   const notify = useMascotToast();
   const money = useMoney();
 
   const [paying, setPaying] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  // A PayPal.Me share needs two taps: open the link, then confirm the transfer.
+  const [openedLinks, setOpenedLinks] = useState<Record<string, boolean>>({});
 
   const all = shares.data?.shares ?? [];
   const currency = shares.data?.currency ?? 'THB';
+
+  function announce(result: {
+    billSettled: boolean;
+    pointsAwarded: number;
+    rank: number | null;
+  }) {
+    setNotice(
+      result.billSettled
+        ? { text: 'Everyone is square. The bill is settled.', settled: true }
+        : {
+            text: `Paid. +${result.pointsAwarded} Globie${
+              result.rank ? `. You were #${result.rank} to pay.` : '.'
+            }`,
+            settled: false,
+          }
+    );
+    notify(
+      result.billSettled
+        ? { title: 'Bill settled', body: 'Everyone is square.' }
+        : {
+            title: 'Paid',
+            body: result.rank ? `You were #${result.rank} to pay.` : 'Globie logged your payment.',
+            points: result.pointsAwarded,
+          }
+    );
+  }
 
   /**
    * PayPal approval happens in the system browser. When the member comes back,
@@ -54,27 +83,45 @@ export default function MySharesScreen() {
     }
     try {
       const result = await capture.mutateAsync({ shareId: share.id });
-      setNotice(
-        result.billSettled
-          ? { text: 'Everyone is square. The bill is settled.', settled: true }
-          : {
-              text: `Paid. +${result.pointsAwarded} Globie${
-                result.rank ? `. You were #${result.rank} to pay.` : '.'
-              }`,
-              settled: false,
-            }
-      );
-      notify(
-        result.billSettled
-          ? { title: 'Bill settled', body: 'Everyone is square.' }
-          : {
-              title: 'Paid',
-              body: result.rank
-                ? `You were #${result.rank} to pay.`
-                : 'Globie logged your payment.',
-              points: result.pointsAwarded,
-            }
-      );
+      announce(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error('Could not confirm the payment'));
+    } finally {
+      setPaying(null);
+    }
+  }
+
+  /**
+   * PayPal.Me has no order to capture: the payer sends the money themselves on
+   * PayPal's page. The first tap opens that page; the second one records that
+   * the transfer happened and settles the share.
+   */
+  async function payPaypalMe(share: Share) {
+    setError(null);
+    setNotice(null);
+
+    if (!openedLinks[share.id]) {
+      if (!share.approveUrl) return;
+      setPaying(share.id);
+      try {
+        await WebBrowser.openBrowserAsync(share.approveUrl);
+        setOpenedLinks((prev) => ({ ...prev, [share.id]: true }));
+        setNotice({
+          text: 'Send the amount in PayPal, then tap “I’ve paid” here.',
+          settled: false,
+        });
+      } catch {
+        setError(new Error('Could not open the PayPal.Me link'));
+      } finally {
+        setPaying(null);
+      }
+      return;
+    }
+
+    setPaying(share.id);
+    try {
+      const result = await confirmPaid.mutateAsync({ shareId: share.id });
+      announce(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error('Could not confirm the payment'));
     } finally {
@@ -168,17 +215,29 @@ export default function MySharesScreen() {
         />
       ) : (
         <View style={styles.list}>
-          {all.map((share) => (
-            <ShareRow
-              key={share.id}
-              share={share}
-              paying={paying === share.id}
-              onPay={
-                share.approveUrl || share.canFinish ? () => pay(share) : undefined
-              }
-              onPress={() => router.push({ pathname: '/groups/[id]', params: { id: share.groupId } })}
-            />
-          ))}
+          {all.map((share) => {
+            const paypalMe = share.paymentMode === 'paypal_me';
+            return (
+              <ShareRow
+                key={share.id}
+                share={share}
+                paying={paying === share.id}
+                payTitle={paypalMe ? (openedLinks[share.id] ? 'I’ve paid' : 'Open link') : undefined}
+                onPay={
+                  paypalMe
+                    ? share.approveUrl
+                      ? () => payPaypalMe(share)
+                      : undefined
+                    : share.approveUrl || share.canFinish
+                      ? () => pay(share)
+                      : undefined
+                }
+                onPress={() =>
+                  router.push({ pathname: '/groups/[id]', params: { id: share.groupId } })
+                }
+              />
+            );
+          })}
         </View>
       )}
     </Screen>

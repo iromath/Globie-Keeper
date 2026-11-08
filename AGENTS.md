@@ -52,6 +52,13 @@ systemd-run --user --unit=chrome-cdp --collect --setenv=DISPLAY=:0 \
 - It runs as a systemd user unit, so `nohup`/`setsid` are unnecessary and plain `&` dies with the terminal.
 - Check before launching: `curl -s http://127.0.0.1:9222/json/version` — if it answers, just call `list_pages`.
 
+## Hackathon submission (PayPal AI Hackathon)
+
+Deadline **Nov 12, 2026 12:00pm PT** (Nov 13 03:00 ICT); judging Dec 1–15, 2026.
+Live: web `https://keeper.globie.ai`, API `https://keeperapi.globie.ai/api` (Docker Compose on Easypanel).
+Current blockers: `master` is ahead of `origin/master` (unpushed) and `iromath/Globie-Keeper` is still **private**; the rules require a public repo with the licence visible in About.
+Read `SUBMISSION.md` for the full checklist, demo credentials, and Devpost field copy before touching submission work.
+
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.

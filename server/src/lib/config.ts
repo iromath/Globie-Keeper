@@ -58,6 +58,22 @@ export const config = {
   /** Video frames sampled per upload before reconciliation. */
   visionMaxFrames: int(process.env.VISION_MAX_FRAMES, 5),
 
+  // --- assistant ------------------------------------------------------------
+  /**
+   * Free-form conversation (lib/assistant.ts). Same OpenAI-compatible endpoint
+   * as the vision model but a text model; falls back to VISION_API_KEY so an
+   * existing deployment only has to name a CHAT_MODEL to turn it on.
+   */
+  chatApiKey: process.env.CHAT_API_KEY ?? process.env.VISION_API_KEY ?? '',
+  chatApiUrl:
+    process.env.CHAT_API_URL ??
+    process.env.VISION_API_URL ??
+    'https://api.deepseek.com/chat/completions',
+  chatModel: process.env.CHAT_MODEL ?? 'deepseek-chat',
+  chatTimeoutMs: int(process.env.CHAT_TIMEOUT_MS, 20_000),
+  /** Previous turns replayed with each request; bounds the prompt size. */
+  chatHistoryTurns: int(process.env.CHAT_HISTORY_TURNS, 8),
+
   // --- PayPal ---------------------------------------------------------------
   paypalEnv: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
   paypalClientId: process.env.PAYPAL_CLIENT_ID ?? '',

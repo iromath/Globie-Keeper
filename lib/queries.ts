@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from './api';
 import type { FxSnapshot } from './fx';
 import type {
+    AgentChatResponse,
     AgentResponse,
     AgentToolName,
     Agreement,
@@ -11,6 +12,7 @@ import type {
     Group,
     LeaderboardRow,
     Member,
+    PaymentMode,
     SettledRate,
     Share,
     TimelineEvent,
@@ -93,6 +95,10 @@ export type MyProfile = {
   paypalEmail: string | null;
   /** Preferred payee when set: the Business account's merchant id. */
   paypalMerchantId: string | null;
+  /** Chosen way to collect; `payee_direct` unless changed. */
+  paypalMode: PaymentMode;
+  /** PayPal.Me slug used by the `paypal_me` mode. */
+  paypalMeHandle: string | null;
 };
 
 export function useMyProfile(enabled = true) {
@@ -143,6 +149,36 @@ export function useUpdatePaypalMerchantId() {
       request<{ userId: string; paypalMerchantId: string | null }>('/me', {
         method: 'PATCH',
         body: { paypalMerchantId },
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
+  });
+}
+
+/**
+ * Which way members reimburse this member. `payee_direct` needs a PayPal
+ * account that can act as payee on an order; `paypal_me` works with any
+ * personal account because the payer just follows a link.
+ */
+export function useUpdatePaypalMode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (paypalMode: PaymentMode) =>
+      request<{ userId: string; paypalMode: PaymentMode }>('/me', {
+        method: 'PATCH',
+        body: { paypalMode },
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
+  });
+}
+
+/** The slug after `paypal.me/`, stored without the leading "@". */
+export function useUpdatePaypalMeHandle() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (paypalMeHandle: string | null) =>
+      request<{ userId: string; paypalMeHandle: string | null }>('/me', {
+        method: 'PATCH',
+        body: { paypalMeHandle },
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.myProfile }),
   });
@@ -401,14 +437,33 @@ export function useCaptureShare() {
   });
 }
 
+/**
+ * PayPal.Me has no order to capture and PayPal never reports the transfer, so
+ * the payer confirms it here and the API settles the share.
+ */
+export function useConfirmSharePaid() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ shareId }: { shareId: string }) =>
+      request<CaptureShareResult>(`/shares/${shareId}/paid`, { body: {} }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.myShares });
+      client.invalidateQueries({ queryKey: queryKeys.myPoints });
+      client.invalidateQueries({ queryKey: ['bill'] });
+      client.invalidateQueries({ queryKey: ['group'] });
+      client.invalidateQueries({ queryKey: ['timeline'] });
+    },
+    onError: () => client.invalidateQueries({ queryKey: queryKeys.myShares }),
+  });
+}
+
 export function useRequestPayments() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ billId }: { billId: string }) =>
-      request<{ requests: { shareId: string; approveUrl: string }[] }>(
-        `/bills/${billId}/request-payments`,
-        { body: {} }
-      ),
+      request<{
+        requests: { shareId: string; approveUrl: string | null; paymentMode: PaymentMode }[];
+      }>(`/bills/${billId}/request-payments`, { body: {} }),
     onSuccess: (_data, vars) => {
       client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
       // Re-requesting can revive a dead checkout, so the member's own list must
@@ -502,5 +557,28 @@ export function useAgentMessage() {
       client.invalidateQueries({ queryKey: queryKeys.myShares });
       client.invalidateQueries({ queryKey: queryKeys.myPoints });
     },
+  });
+}
+
+export type AgentChatInput = {
+  message: string;
+  groupId: string;
+  billId?: string | null;
+  /** Recent turns, oldest first; the server truncates what it replays. */
+  history: { role: 'user' | 'assistant'; content: string }[];
+};
+
+/** Free-form Globie turn: conversation only, no tool runs, no writes. */
+export function useAgentChat() {
+  return useMutation({
+    mutationFn: ({ message, groupId, billId, history }: AgentChatInput) =>
+      request<AgentChatResponse>('/agent/chat', {
+        body: {
+          message,
+          group_id: groupId,
+          bill_id: billId ?? null,
+          history,
+        },
+      }),
   });
 }

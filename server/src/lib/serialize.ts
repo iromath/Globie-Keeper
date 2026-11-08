@@ -208,6 +208,8 @@ export type ShareRow = {
   created_at: Date;
   paypal_order_id?: string | null;
   paypal_approve_url?: string | null;
+  /** How the fronter asked to be reimbursed when this share was requested. */
+  payment_mode?: string | null;
 };
 
 export function mapShare(row: ShareRow, canFinish = false) {
@@ -232,6 +234,11 @@ export function mapShare(row: ShareRow, canFinish = false) {
     paidAt: row.paid_at ? iso(row.paid_at) : null,
     paypalOrderId: row.paypal_order_id ?? null,
     approveUrl: row.paypal_approve_url ?? null,
+    /**
+     * `payee_direct` settles through a PayPal order the server can capture;
+     * `paypal_me` is a plain link the payer confirms by hand.
+     */
+    paymentMode: (row.payment_mode as 'payee_direct' | 'paypal_me' | null) ?? null,
     /** PayPal holds an approval we can still capture; only on a `requested` share. */
     canFinish,
   };

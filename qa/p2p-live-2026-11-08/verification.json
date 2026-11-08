@@ -1,0 +1,454 @@
+{
+ "bill": {
+  "bill": {
+   "id": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+   "agreementId": "de11a650-bb0f-4238-847f-b68545ac128a",
+   "merchant": "OPENMIND KITCHEN",
+   "currency": "THB",
+   "subtotalMinor": 114000,
+   "taxMinor": 7980,
+   "serviceChargeMinor": 0,
+   "tipMinor": 0,
+   "discountMinor": 0,
+   "totalMinor": 121980,
+   "status": "SETTLED",
+   "items": [
+    {
+     "id": "f9892790-44c8-4535-af0a-368320faba91",
+     "name": "Tom Yum",
+     "qty": 2,
+     "unitPriceMinor": 25000,
+     "lineTotalMinor": 50000,
+     "confidence": 0.99
+    },
+    {
+     "id": "fa05d68c-7564-4556-8c75-081933725e79",
+     "name": "Fried Rice",
+     "qty": 1,
+     "unitPriceMinor": 18000,
+     "lineTotalMinor": 18000,
+     "confidence": 0.99
+    },
+    {
+     "id": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+     "name": "Pad Thai",
+     "qty": 1,
+     "unitPriceMinor": 22000,
+     "lineTotalMinor": 22000,
+     "confidence": 0.99
+    },
+    {
+     "id": "74f849b0-9e93-4563-ad18-64396e780703",
+     "name": "Water",
+     "qty": 4,
+     "unitPriceMinor": 1500,
+     "lineTotalMinor": 6000,
+     "confidence": 0.99
+    },
+    {
+     "id": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+     "name": "Mango Sticky Rice",
+     "qty": 2,
+     "unitPriceMinor": 9000,
+     "lineTotalMinor": 18000,
+     "confidence": 0.99
+    }
+   ],
+   "framesExtracted": 1,
+   "warnings": []
+  },
+  "allocations": [
+   {
+    "id": "26b5e5c5-88d9-4987-bd68-02102cd50d46",
+    "billItemId": "f9892790-44c8-4535-af0a-368320faba91",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "itemName": "Tom Yum",
+    "qty": 1,
+    "amountMinor": 12500,
+    "status": "confirmed"
+   },
+   {
+    "id": "dcb7c478-2c95-40b8-9c4f-fee86a5d95e3",
+    "billItemId": "f9892790-44c8-4535-af0a-368320faba91",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "itemName": "Tom Yum",
+    "qty": 1,
+    "amountMinor": 12500,
+    "status": "confirmed"
+   },
+   {
+    "id": "0fd16210-7b4f-452b-b15f-d7bae38ba8b4",
+    "billItemId": "f9892790-44c8-4535-af0a-368320faba91",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "itemName": "Tom Yum",
+    "qty": 1,
+    "amountMinor": 12500,
+    "status": "confirmed"
+   },
+   {
+    "id": "545f0dab-8ff5-46b6-bf79-c9c8fa81a90e",
+    "billItemId": "f9892790-44c8-4535-af0a-368320faba91",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "itemName": "Tom Yum",
+    "qty": 1,
+    "amountMinor": 12500,
+    "status": "confirmed"
+   },
+   {
+    "id": "81eeac6e-6769-4013-b6e0-2ca51af45648",
+    "billItemId": "fa05d68c-7564-4556-8c75-081933725e79",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "itemName": "Fried Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "5ead1102-77d8-4cba-bc26-ff053f68d0ed",
+    "billItemId": "fa05d68c-7564-4556-8c75-081933725e79",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "itemName": "Fried Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "098b44dc-fe1e-4da8-a650-80199e8f8d08",
+    "billItemId": "fa05d68c-7564-4556-8c75-081933725e79",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "itemName": "Fried Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "7457741c-619e-4e00-8486-2a5055681d3a",
+    "billItemId": "fa05d68c-7564-4556-8c75-081933725e79",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "itemName": "Fried Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "f8606be2-f8cd-4c49-a8f9-62eda810d667",
+    "billItemId": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "itemName": "Pad Thai",
+    "qty": 1,
+    "amountMinor": 5500,
+    "status": "confirmed"
+   },
+   {
+    "id": "0a51a288-ab86-4b47-a8b3-b2e4a9ce5932",
+    "billItemId": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "itemName": "Pad Thai",
+    "qty": 1,
+    "amountMinor": 5500,
+    "status": "confirmed"
+   },
+   {
+    "id": "9688f8a9-da35-4f37-8a0d-36fb3ed161b3",
+    "billItemId": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "itemName": "Pad Thai",
+    "qty": 1,
+    "amountMinor": 5500,
+    "status": "confirmed"
+   },
+   {
+    "id": "66867f4a-446a-4e91-a8e6-a3cb0ca09a2a",
+    "billItemId": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "itemName": "Pad Thai",
+    "qty": 1,
+    "amountMinor": 5500,
+    "status": "confirmed"
+   },
+   {
+    "id": "260fb9b4-dbd0-44a9-829e-d3e7fc46b20d",
+    "billItemId": "74f849b0-9e93-4563-ad18-64396e780703",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "itemName": "Water",
+    "qty": 1,
+    "amountMinor": 1500,
+    "status": "confirmed"
+   },
+   {
+    "id": "713d1173-1031-4122-9b82-250b785b93a7",
+    "billItemId": "74f849b0-9e93-4563-ad18-64396e780703",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "itemName": "Water",
+    "qty": 1,
+    "amountMinor": 1500,
+    "status": "confirmed"
+   },
+   {
+    "id": "247ef458-61ca-488d-afd2-fc2087e7dba9",
+    "billItemId": "74f849b0-9e93-4563-ad18-64396e780703",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "itemName": "Water",
+    "qty": 1,
+    "amountMinor": 1500,
+    "status": "confirmed"
+   },
+   {
+    "id": "b6e09763-ac08-40b7-b170-93f52db946e7",
+    "billItemId": "74f849b0-9e93-4563-ad18-64396e780703",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "itemName": "Water",
+    "qty": 1,
+    "amountMinor": 1500,
+    "status": "confirmed"
+   },
+   {
+    "id": "5b0ac10a-ca9b-4207-a1ff-ed91874879dc",
+    "billItemId": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "itemName": "Mango Sticky Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "e5f5cebb-1021-4fd3-b09c-d9b3fdb62941",
+    "billItemId": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "itemName": "Mango Sticky Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "8311dc88-7beb-4aec-9cd3-13a4088e92b0",
+    "billItemId": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "itemName": "Mango Sticky Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   },
+   {
+    "id": "cb9491bd-546e-4c62-95f4-4c0b9fc1d0b3",
+    "billItemId": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "itemName": "Mango Sticky Rice",
+    "qty": 1,
+    "amountMinor": 4500,
+    "status": "confirmed"
+   }
+  ],
+  "shares": [
+   {
+    "id": "1e3e0766-ae9a-4ea6-8e37-0dbcb1d75cbc",
+    "billId": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "groupName": "Friday dinner at Openmind Kitchen",
+    "memberId": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "memberName": "Nattapong Sirichai",
+    "amountMinor": 36480,
+    "currency": "THB",
+    "status": "settled",
+    "dueAt": "2026-11-15T08:32:59.083Z",
+    "paidAt": null,
+    "paypalOrderId": null,
+    "approveUrl": null,
+    "paymentMode": null,
+    "canFinish": false
+   },
+   {
+    "id": "137efcf9-79e5-4c69-887d-bbf78e5cf4c0",
+    "billId": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "groupName": "Friday dinner at Openmind Kitchen",
+    "memberId": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "memberName": "Kittipong Arun",
+    "amountMinor": 28500,
+    "currency": "THB",
+    "status": "paid",
+    "dueAt": "2026-11-15T08:32:59.083Z",
+    "paidAt": "2026-11-08T08:35:43.045Z",
+    "paypalOrderId": null,
+    "approveUrl": "https://www.paypal.com/paypalme/openmindprojects/285.00THB",
+    "paymentMode": "paypal_me",
+    "canFinish": false
+   },
+   {
+    "id": "11ce3362-29a1-4a9c-8a06-5ab83fe5d20f",
+    "billId": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "groupName": "Friday dinner at Openmind Kitchen",
+    "memberId": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "memberName": "Suda Panyarat",
+    "amountMinor": 28500,
+    "currency": "THB",
+    "status": "paid",
+    "dueAt": "2026-11-15T08:32:59.083Z",
+    "paidAt": "2026-11-08T08:37:44.808Z",
+    "paypalOrderId": null,
+    "approveUrl": "https://www.paypal.com/paypalme/openmindprojects/285.00THB",
+    "paymentMode": "paypal_me",
+    "canFinish": false
+   },
+   {
+    "id": "5ad03afb-9a8a-4aaf-a709-1c46c35f90a9",
+    "billId": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "groupName": "Friday dinner at Openmind Kitchen",
+    "memberId": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "memberName": "Malee Wongsuwan",
+    "amountMinor": 28500,
+    "currency": "THB",
+    "status": "paid",
+    "dueAt": "2026-11-15T08:32:59.083Z",
+    "paidAt": "2026-11-08T08:36:45.750Z",
+    "paypalOrderId": null,
+    "approveUrl": "https://www.paypal.com/paypalme/openmindprojects/285.00THB",
+    "paymentMode": "paypal_me",
+    "canFinish": false
+   }
+  ]
+ },
+ "group": {
+  "group": {
+   "id": "1251169f-17fa-43fd-abce-607084a620d5",
+   "name": "Friday dinner at Openmind Kitchen",
+   "defaultCurrency": "THB",
+   "ownerId": "d41fa46b-78f0-424f-a771-c269a6f5c5be",
+   "inviteToken": "SAB9JW",
+   "createdAt": "2026-11-08T08:32:39.681Z"
+  },
+  "members": [
+   {
+    "id": "17e83107-75d6-41a7-8d04-ae67f8050547",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "userId": "d41fa46b-78f0-424f-a771-c269a6f5c5be",
+    "displayName": "Nattapong Sirichai",
+    "role": "owner",
+    "status": "active"
+   },
+   {
+    "id": "bf027594-846f-4f33-b9ff-4aa7175c42c6",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "userId": "3a56b722-1f49-432c-8fb3-ce2c04da45f1",
+    "displayName": "Malee Wongsuwan",
+    "role": "member",
+    "status": "active"
+   },
+   {
+    "id": "a6c1db05-6c8d-4aa0-a27d-8041d2d23917",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "userId": "0962dbbb-a653-44e8-89c0-5c224735f4df",
+    "displayName": "Kittipong Arun",
+    "role": "member",
+    "status": "active"
+   },
+   {
+    "id": "af74842d-8130-4d29-b3f3-0247e483c4e4",
+    "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+    "userId": "af7576ee-5e81-49aa-9b25-cd3b0b3b1d14",
+    "displayName": "Suda Panyarat",
+    "role": "member",
+    "status": "active"
+   }
+  ],
+  "agreement": {
+   "id": "de11a650-bb0f-4238-847f-b68545ac128a",
+   "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+   "currency": "THB",
+   "estimatedTotalMinor": 121980,
+   "deadline": null,
+   "status": "settled",
+   "createdBy": "17e83107-75d6-41a7-8d04-ae67f8050547",
+   "frontedBy": "17e83107-75d6-41a7-8d04-ae67f8050547",
+   "acceptedCount": 4,
+   "memberCount": 4
+  },
+  "bill": {
+   "id": "3272dc4c-2db0-4b6c-b23c-b7816baac9a0",
+   "agreementId": "de11a650-bb0f-4238-847f-b68545ac128a",
+   "merchant": "OPENMIND KITCHEN",
+   "currency": "THB",
+   "subtotalMinor": 114000,
+   "taxMinor": 7980,
+   "serviceChargeMinor": 0,
+   "tipMinor": 0,
+   "discountMinor": 0,
+   "totalMinor": 121980,
+   "status": "SETTLED",
+   "items": [
+    {
+     "id": "f9892790-44c8-4535-af0a-368320faba91",
+     "name": "Tom Yum",
+     "qty": 2,
+     "unitPriceMinor": 25000,
+     "lineTotalMinor": 50000,
+     "confidence": 0.99
+    },
+    {
+     "id": "fa05d68c-7564-4556-8c75-081933725e79",
+     "name": "Fried Rice",
+     "qty": 1,
+     "unitPriceMinor": 18000,
+     "lineTotalMinor": 18000,
+     "confidence": 0.99
+    },
+    {
+     "id": "bdadcdb1-59fc-4fd1-9a94-6e633afc6842",
+     "name": "Pad Thai",
+     "qty": 1,
+     "unitPriceMinor": 22000,
+     "lineTotalMinor": 22000,
+     "confidence": 0.99
+    },
+    {
+     "id": "74f849b0-9e93-4563-ad18-64396e780703",
+     "name": "Water",
+     "qty": 4,
+     "unitPriceMinor": 1500,
+     "lineTotalMinor": 6000,
+     "confidence": 0.99
+    },
+    {
+     "id": "83cbd0f7-a27b-487e-bf1b-8ed7a9b4fabd",
+     "name": "Mango Sticky Rice",
+     "qty": 2,
+     "unitPriceMinor": 9000,
+     "lineTotalMinor": 18000,
+     "confidence": 0.99
+    }
+   ],
+   "framesExtracted": 1,
+   "warnings": []
+  },
+  "me": {
+   "id": "17e83107-75d6-41a7-8d04-ae67f8050547",
+   "groupId": "1251169f-17fa-43fd-abce-607084a620d5",
+   "userId": "d41fa46b-78f0-424f-a771-c269a6f5c5be",
+   "displayName": "Nattapong Sirichai",
+   "role": "owner",
+   "status": "active"
+  }
+ }
+}

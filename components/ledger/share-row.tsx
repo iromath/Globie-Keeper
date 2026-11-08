@@ -44,11 +44,14 @@ export function ShareRow({
   onPress,
   onPay,
   paying = false,
+  payTitle,
 }: {
   share: Share;
   onPress?: () => void;
   onPay?: () => void;
   paying?: boolean;
+  /** Overrides the default label, e.g. "Open link" before a PayPal.Me transfer. */
+  payTitle?: string;
 }) {
   const settled = share.status === 'paid' || share.status === 'settled';
   const tone = statusTone[share.status];
@@ -72,9 +75,11 @@ export function ShareRow({
         {onPress ? <Icon name={icon.chevronRight} size={15} color={colors.mutedDim} /> : null}
       </View>
       <Text variant="caption" tone={tone}>
-        {share.status === 'requested' && share.canFinish
-          ? 'Approved — finish the payment'
-          : statusCopy[share.status]}
+        {share.status === 'requested' && share.paymentMode === 'paypal_me'
+          ? 'PayPal.Me link sent — tap “I’ve paid” after sending'
+          : share.status === 'requested' && share.canFinish
+            ? 'Approved — finish the payment'
+            : statusCopy[share.status]}
         {share.dueAt ? `, due ${new Date(share.dueAt).toLocaleDateString()}` : ''}
       </Text>
     </View>
@@ -117,9 +122,16 @@ export function ShareRow({
       </View>
       {onPay ? (
         <Button
-          title={share.canFinish ? 'Finish payment' : 'Pay'}
+          title={
+            payTitle ??
+            (share.paymentMode === 'paypal_me' && !settled
+              ? 'I’ve paid'
+              : share.canFinish
+                ? 'Finish payment'
+                : 'Pay')
+          }
           compact
-          icon={icon.card}
+          icon={share.paymentMode === 'paypal_me' ? icon.link : icon.card}
           loading={paying}
           disabled={settled}
           onPress={onPay}

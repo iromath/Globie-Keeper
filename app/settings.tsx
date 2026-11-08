@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Platform, StyleSheet, Switch, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
-import { Icon, icon } from '@/components/ui/icon';
+import { Icon, icon, type IconName } from '@/components/ui/icon';
 import { Screen } from '@/components/ui/screen';
 import { SectionHeading } from '@/components/ui/section';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,9 +18,32 @@ import {
     useNotificationSettings,
     useUpdateNotificationChannel,
     useUpdatePaypalEmail,
+    useUpdatePaypalMeHandle,
     useUpdatePaypalMerchantId,
-    type NotificationChannel,
+    useUpdatePaypalMode,
+    type NotificationChannel
 } from '@/lib/queries';
+import type { PaymentMode } from '@/lib/types';
+
+/**
+ * The two ways a fronter can collect. They are genuinely different plumbing:
+ * an order names the account as payee and Globie can confirm the capture, while
+ * a PayPal.Me link asks the payer to send the money and tell us they did.
+ */
+const PAYMENT_MODES: { value: PaymentMode; title: string; body: string; glyph: IconName }[] = [
+  {
+    value: 'payee_direct',
+    title: 'PayPal order',
+    body: 'Business or merchant account. Members approve a PayPal order and Globie confirms it for you.',
+    glyph: icon.card,
+  },
+  {
+    value: 'paypal_me',
+    title: 'PayPal.Me link',
+    body: 'Any personal account. Members open your link, pay, then tap “I’ve paid” — you confirm with them.',
+    glyph: icon.link,
+  },
+];
 
 /** One sentence per channel, written from the member's side of the nudge. */
 const COPY: Record<NotificationChannel, { title: string; body: string }> = {
@@ -95,11 +118,14 @@ export default function SettingsScreen() {
   const profile = useMyProfile();
   const updatePaypal = useUpdatePaypalEmail();
   const updateMerchant = useUpdatePaypalMerchantId();
+  const updateMode = useUpdatePaypalMode();
+  const updateHandle = useUpdatePaypalMeHandle();
   const client = useQueryClient();
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [paypalDraft, setPaypalDraft] = useState<string | null>(null);
   const [merchantDraft, setMerchantDraft] = useState<string | null>(null);
+  const [handleDraft, setHandleDraft] = useState<string | null>(null);
 
   const savedPaypal = profile.data?.paypalEmail ?? '';
   const paypalValue = paypalDraft ?? savedPaypal;
@@ -108,6 +134,14 @@ export default function SettingsScreen() {
   const savedMerchant = profile.data?.paypalMerchantId ?? '';
   const merchantValue = merchantDraft ?? savedMerchant;
   const merchantDirty = merchantDraft !== null && merchantDraft.trim() !== savedMerchant;
+
+  const mode = profile.data?.paypalMode ?? 'payee_direct';
+  const savedHandle = profile.data?.paypalMeHandle ?? '';
+  const handleValue = handleDraft ?? savedHandle;
+  // The server strips a leading "@", so the draft is compared the same way.
+  const handleDirty =
+    handleDraft !== null && handleDraft.trim().replace(/^@/, '') !== savedHandle;
+  const handlePreview = handleValue.trim().replace(/^@/, '');
 
   const canPush = pushSupported() && hasPushTarget();
   const blockedPush = pushBlockedReason();
@@ -127,6 +161,16 @@ export default function SettingsScreen() {
     try {
       await updateMerchant.mutateAsync(next === '' ? null : next);
       setMerchantDraft(null);
+    } catch {
+      // Same as above: the error stays attached to the field.
+    }
+  }
+
+  async function saveHandle() {
+    const next = (handleDraft ?? '').trim().replace(/^@/, '');
+    try {
+      await updateHandle.mutateAsync(next === '' ? null : next);
+      setHandleDraft(null);
     } catch {
       // Same as above: the error stays attached to the field.
     }
@@ -156,68 +200,155 @@ export default function SettingsScreen() {
         <SectionHeading
           glyph={icon.paypal}
           title="Getting paid"
-          hint="Reimbursements only land in a PayPal Business account that can receive payments. Add that account's email, plus its merchant ID if you have one."
+          hint="Choose how members reimburse you. The money moves from them straight to you — Globie never holds it."
         />
         {profile.isLoading ? (
           <Skeleton height={76} />
         ) : (
           <>
-            <Field
-              label="PayPal email"
-              hint={
-                savedPaypal
-                  ? 'Must belong to a PayPal Business account that accepts payments. Globie never holds the money.'
-                  : 'Members cannot reimburse you until a Business PayPal account is set.'
-              }
-              value={paypalValue}
-              onChangeText={setPaypalDraft}
-              placeholder="you@example.com"
-              inputMode="email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={() => {
-                if (paypalDirty) void savePaypal();
-              }}
-              editable={!updatePaypal.isPending}
-              error={updatePaypal.error ? updatePaypal.error.message : undefined}
-            />
-            <Button
-              title="Save PayPal email"
-              icon={icon.check}
-              variant="secondary"
-              compact
-              onPress={() => void savePaypal()}
-              loading={updatePaypal.isPending}
-              disabled={!paypalDirty}
-              style={styles.inline}
-            />
-            <Field
-              label="PayPal merchant ID"
-              hint="Optional. When set, payments address this account directly instead of the email."
-              value={merchantValue}
-              onChangeText={setMerchantDraft}
-              placeholder="Merchant account ID"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={() => {
-                if (merchantDirty) void saveMerchant();
-              }}
-              editable={!updateMerchant.isPending}
-              error={updateMerchant.error ? updateMerchant.error.message : undefined}
-            />
-            <Button
-              title="Save merchant ID"
-              icon={icon.check}
-              variant="secondary"
-              compact
-              onPress={() => void saveMerchant()}
-              loading={updateMerchant.isPending}
-              disabled={!merchantDirty}
-              style={styles.inline}
-            />
+            <View style={styles.rows} accessibilityRole="radiogroup">
+              {PAYMENT_MODES.map((option) => {
+                const selected = mode === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    aria-checked={selected}
+                    aria-disabled={updateMode.isPending}
+                    accessibilityLabel={`${option.title}. ${option.body}`}
+                    disabled={updateMode.isPending}
+                    onPress={() => {
+                      if (!selected) updateMode.mutate(option.value);
+                    }}
+                    style={({ pressed }) => [
+                      styles.choice,
+                      selected && styles.choiceSelected,
+                      pressed && styles.choicePressed,
+                    ]}
+                  >
+                    <View style={[styles.choiceDisc, selected && styles.choiceDiscSelected]}>
+                      <Icon
+                        name={option.glyph}
+                        size={16}
+                        color={selected ? colors.accent : colors.muted}
+                      />
+                    </View>
+                    <View style={styles.copy}>
+                      <Text variant="label" tone={selected ? 'accent' : 'default'}>
+                        {option.title}
+                      </Text>
+                      <Text variant="caption" tone="dim">
+                        {option.body}
+                      </Text>
+                    </View>
+                    {selected ? <Icon name={icon.checkCircle} size={18} color={colors.accent} /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            {updateMode.error ? (
+              <Text variant="caption" tone="danger" accessibilityLiveRegion="polite">
+                {updateMode.error.message}
+              </Text>
+            ) : null}
+
+            {mode === 'paypal_me' ? (
+              <>
+                <Field
+                  label="PayPal.Me handle"
+                  hint={
+                    handlePreview
+                      ? `Members will be sent paypal.me/${handlePreview} with the amount filled in.`
+                      : 'The part after paypal.me/ in your profile link. Any personal account has one.'
+                  }
+                  value={handleValue}
+                  onChangeText={setHandleDraft}
+                  placeholder="your-handle"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    if (handleDirty) void saveHandle();
+                  }}
+                  editable={!updateHandle.isPending}
+                  error={updateHandle.error ? updateHandle.error.message : undefined}
+                />
+                <Button
+                  title="Save handle"
+                  icon={icon.check}
+                  variant="secondary"
+                  compact
+                  onPress={() => void saveHandle()}
+                  loading={updateHandle.isPending}
+                  disabled={!handleDirty}
+                  style={styles.inline}
+                />
+                {!savedHandle ? (
+                  <Text variant="caption" tone="warn">
+                    Members cannot reimburse you until a PayPal.Me handle is saved.
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Field
+                  label="PayPal email"
+                  hint={
+                    savedPaypal
+                      ? 'Must belong to a PayPal account that can accept payments. Globie never holds the money.'
+                      : 'Members cannot reimburse you until a PayPal email is set.'
+                  }
+                  value={paypalValue}
+                  onChangeText={setPaypalDraft}
+                  placeholder="you@example.com"
+                  inputMode="email"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    if (paypalDirty) void savePaypal();
+                  }}
+                  editable={!updatePaypal.isPending}
+                  error={updatePaypal.error ? updatePaypal.error.message : undefined}
+                />
+                <Button
+                  title="Save PayPal email"
+                  icon={icon.check}
+                  variant="secondary"
+                  compact
+                  onPress={() => void savePaypal()}
+                  loading={updatePaypal.isPending}
+                  disabled={!paypalDirty}
+                  style={styles.inline}
+                />
+                <Field
+                  label="PayPal merchant ID"
+                  hint="Optional. When set, payments address this account directly instead of the email."
+                  value={merchantValue}
+                  onChangeText={setMerchantDraft}
+                  placeholder="Merchant account ID"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    if (merchantDirty) void saveMerchant();
+                  }}
+                  editable={!updateMerchant.isPending}
+                  error={updateMerchant.error ? updateMerchant.error.message : undefined}
+                />
+                <Button
+                  title="Save merchant ID"
+                  icon={icon.check}
+                  variant="secondary"
+                  compact
+                  onPress={() => void saveMerchant()}
+                  loading={updateMerchant.isPending}
+                  disabled={!merchantDirty}
+                  style={styles.inline}
+                />
+              </>
+            )}
           </>
         )}
       </Card>
@@ -341,4 +472,27 @@ const styles = StyleSheet.create({
   },
   flex: { flex: 1 },
   inline: { alignSelf: 'flex-start' },
+  choice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  choiceSelected: { borderColor: colors.accentDeep, backgroundColor: colors.wash },
+  choicePressed: { backgroundColor: colors.surfaceHi },
+  choiceDisc: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  choiceDiscSelected: { borderColor: 'rgba(110, 240, 190, 0.4)' },
 });

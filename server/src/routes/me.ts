@@ -10,6 +10,8 @@ import {
     currencyCode,
     optionalEmail,
     optionalMerchantId,
+    optionalPaypalMeHandle,
+    paymentMode,
     requiredString,
 } from '../lib/validate.js';
 import { requireUser } from '../plugins/auth.js';
@@ -86,6 +88,8 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       paypal_payer_id: string | null;
       paypal_email: string | null;
       paypal_merchant_id: string | null;
+      paypal_mode: string | null;
+      paypal_me_handle: string | null;
     }>(
       `select u.display_currency, u.paypal_payer_id,
               (select max(m.paypal_email)
@@ -93,7 +97,13 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
                 where m.user_id = u.id and m.status <> 'removed') as paypal_email,
               (select max(m.paypal_merchant_id)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id
+                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id,
+              (select max(m.paypal_mode)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_mode,
+              (select max(m.paypal_me_handle)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -109,6 +119,8 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       paypalLinked: Boolean(row?.paypal_payer_id),
       paypalEmail: row?.paypal_email?.trim() ?? null,
       paypalMerchantId: row?.paypal_merchant_id?.trim() ?? null,
+      paypalMode: row?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct',
+      paypalMeHandle: row?.paypal_me_handle?.trim() ?? null,
     };
   });
 
@@ -120,6 +132,10 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
    * `paypalEmail` and `paypalMerchantId` say where members reimburse the
    * fronter, so both are written to every active membership — that is what
    * `requestPaymentForShare` reads. The merchant id wins when both are set.
+   *
+   * `paypalMode` splits the two ways to get paid: `payee_direct` needs a
+   * Business-style account that can be a payee on an order, while `paypal_me`
+   * works with any personal account through a PayPal.Me link.
    */
   app.patch('/me', async (request) => {
     const auth = requireUser(request);
@@ -136,6 +152,25 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
         auth.userId,
         displayCurrency,
       ]);
+    }
+
+    // These four live on the membership, so a user with no group has nothing to
+    // write to. Say so instead of accepting the change and silently dropping it.
+    if (
+      ['paypalEmail', 'paypalMerchantId', 'paypalMode', 'paypalMeHandle'].some(
+        (key) => key in body,
+      )
+    ) {
+      const { rows } = await query(
+        `select 1 from members where user_id = $1 and status <> 'removed' limit 1`,
+        [auth.userId],
+      );
+      if (rows.length === 0) {
+        throw ApiError.conflict(
+          'no_membership',
+          'Join a group first — payment details apply to every group you are in.',
+        );
+      }
     }
 
     if ('paypalEmail' in body) {
@@ -158,10 +193,32 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
+    if ('paypalMode' in body) {
+      const mode = paymentMode(body, 'paypalMode');
+
+      await query(
+        `update members set paypal_mode = $2
+          where user_id = $1 and status <> 'removed'`,
+        [auth.userId, mode],
+      );
+    }
+
+    if ('paypalMeHandle' in body) {
+      const handle = optionalPaypalMeHandle(body, 'paypalMeHandle');
+
+      await query(
+        `update members set paypal_me_handle = $2
+          where user_id = $1 and status <> 'removed'`,
+        [auth.userId, handle],
+      );
+    }
+
     const { rows } = await query<{
       display_currency: string | null;
       paypal_email: string | null;
       paypal_merchant_id: string | null;
+      paypal_mode: string | null;
+      paypal_me_handle: string | null;
     }>(
       `select u.display_currency,
               (select max(m.paypal_email)
@@ -169,7 +226,13 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
                 where m.user_id = u.id and m.status <> 'removed') as paypal_email,
               (select max(m.paypal_merchant_id)
                  from members m
-                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id
+                where m.user_id = u.id and m.status <> 'removed') as paypal_merchant_id,
+              (select max(m.paypal_mode)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_mode,
+              (select max(m.paypal_me_handle)
+                 from members m
+                where m.user_id = u.id and m.status <> 'removed') as paypal_me_handle
          from users u
         where u.id = $1`,
       [auth.userId],
@@ -180,6 +243,8 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       displayCurrency: rows[0]?.display_currency?.trim() ?? null,
       paypalEmail: rows[0]?.paypal_email?.trim() ?? null,
       paypalMerchantId: rows[0]?.paypal_merchant_id?.trim() ?? null,
+      paypalMode: rows[0]?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct',
+      paypalMeHandle: rows[0]?.paypal_me_handle?.trim() ?? null,
     };
   });
 
@@ -191,7 +256,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
       `select s.id, s.bill_id, b.agreement_id, a.group_id, g.name as group_name,
               s.member_id, u.display_name as member_name, s.amount, s.currency,
               s.status, s.due_at, s.paid_at, s.created_at,
-              s.paypal_order_id, s.paypal_approve_url
+              s.paypal_order_id, s.paypal_approve_url, s.payment_mode
          from shares s
          join bills b on b.id = s.bill_id
          join agreements a on a.id = b.agreement_id

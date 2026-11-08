@@ -251,6 +251,7 @@ export default function GroupScreen() {
       </View>
 
       <GlobieChat
+        groupId={id}
         agreementId={agreement?.id ?? null}
         billId={bill?.id ?? null}
         billStatus={bill?.status ?? null}

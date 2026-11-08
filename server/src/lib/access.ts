@@ -97,6 +97,8 @@ export type ShareContext = {
   currency: string;
   status: string;
   paypalOrderId: string | null;
+  /** Snapshot of how the fronter asked to be reimbursed for this share. */
+  paymentMode: string | null;
   member: MemberContext;
 };
 
@@ -113,10 +115,11 @@ export async function requireShareMember(
     currency: string;
     status: string;
     paypal_order_id: string | null;
+    payment_mode: string | null;
     user_id: string;
   }>(
     `select s.bill_id, b.agreement_id, a.group_id, s.amount, s.currency,
-            s.status, s.paypal_order_id, m.user_id
+            s.status, s.paypal_order_id, s.payment_mode, m.user_id
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -142,6 +145,7 @@ export async function requireShareMember(
     currency: row.currency.trim(),
     status: row.status,
     paypalOrderId: row.paypal_order_id,
+    paymentMode: row.payment_mode,
     member,
   };
 }

@@ -2,11 +2,15 @@
  * Member-facing payment actions. Approving happens in the system browser;
  * this captures the order server-side and settles the share immediately, so the
  * UI does not have to wait for the webhook to arrive.
+ *
+ * PayPal.Me requests have no order to capture: PayPal never tells us the payer
+ * paid, so the payer confirms it and we record the settlement ourselves.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
 
 import { requireShareMember } from '../lib/access.js';
+import { p2pRef } from '../lib/bills.js';
 import { ApiError } from '../lib/http-error.js';
 import { captureOrder, isPayPalConfigured, readOrder } from '../lib/paypal.js';
 import { failShare, settleShare } from '../lib/settlement.js';
@@ -83,6 +87,65 @@ export const shareRoutes: FastifyPluginAsync = async (app) => {
       status: 'paid' as const,
       alreadyPaid: result.alreadyPaid,
       captureId: capture.captureId,
+      pointsAwarded: result.pointsAwarded,
+      rank: result.rank,
+      billSettled: result.billSettled,
+      settledRate: result.settledRate,
+    };
+  });
+
+  /**
+   * The payer says they sent the money through the fronter's PayPal.Me link.
+   * Nothing else can know: a PayPal.Me transfer has no order to read back, so
+   * this confirmation is the only signal that the share is settled.
+   */
+  app.post<ShareParams>('/shares/:id/paid', async (request) => {
+    const shareId = pathUuid(request.params.id);
+    const ctx = await requireShareMember(request, shareId);
+
+    if (ctx.status === 'paid' || ctx.status === 'settled') {
+      return {
+        shareId,
+        status: ctx.status,
+        alreadyPaid: true,
+        pointsAwarded: 0,
+        rank: null,
+        billSettled: false,
+        settledRate: null,
+      };
+    }
+
+    if (ctx.paymentMode !== 'paypal_me') {
+      throw ApiError.conflict(
+        'payment_not_paypal_me',
+        'Only a PayPal.Me request can be confirmed by hand — finish the PayPal checkout instead',
+      );
+    }
+
+    if (ctx.status !== 'requested') {
+      throw ApiError.conflict(
+        'payment_not_requested',
+        'This share has no PayPal.Me request yet',
+      );
+    }
+
+    const result = await settleShare({
+      shareId,
+      orderId: null,
+      captureId: p2pRef(shareId),
+      payload: {
+        source: 'paypal_me',
+        confirmedBy: ctx.member.displayName,
+        confirmedAt: new Date().toISOString(),
+      },
+      actor: ctx.member.displayName,
+    });
+
+    return {
+      shareId,
+      status: 'paid' as const,
+      alreadyPaid: result.alreadyPaid,
+      captureId: null,
       pointsAwarded: result.pointsAwarded,
       rank: result.rank,
       billSettled: result.billSettled,

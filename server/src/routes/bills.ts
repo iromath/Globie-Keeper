@@ -32,6 +32,7 @@ import {
     type BillRow,
 } from '../lib/serialize.js';
 import { awardFrontedGlobie, reconcileShare } from '../lib/settlement.js';
+import type { PaymentMode } from '../lib/validate.js';
 import { asRecord, currencyCode, pathUuid, requiredUuid } from '../lib/validate.js';
 
 type BillParams = { Params: { id: string } };
@@ -620,7 +621,11 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     // is outstanding, and hand back the links that are already live so pressing
     // the button again reopens them instead of doing nothing.
     const outstanding: typeof shares = [];
-    const requests: { shareId: string; approveUrl: string }[] = [];
+    const requests: {
+      shareId: string;
+      approveUrl: string | null;
+      paymentMode: PaymentMode;
+    }[] = [];
 
     for (const share of shares) {
       if (share.status === 'proposed' || share.status === 'failed') {
@@ -629,6 +634,18 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       }
       if (share.status !== 'requested') continue;
 
+      // A PayPal.Me link has no order behind it, so there is nothing to re-read.
+      if (share.payment_mode === 'paypal_me') {
+        if (share.paypal_approve_url) {
+          requests.push({
+            shareId: share.id,
+            approveUrl: share.paypal_approve_url,
+            paymentMode: 'paypal_me',
+          });
+        }
+        continue;
+      }
+
       const state = await reconcileShare(share);
       // PayPal already holds an approval we can capture; a second order would
       // let the member pay twice instead of finishing the first one.
@@ -636,7 +653,11 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       if (state.status === 'failed') {
         outstanding.push({ ...share, status: 'failed' });
       } else if (share.paypal_approve_url) {
-        requests.push({ shareId: share.id, approveUrl: share.paypal_approve_url });
+        requests.push({
+          shareId: share.id,
+          approveUrl: share.paypal_approve_url,
+          paymentMode: 'payee_direct',
+        });
       }
     }
 
@@ -651,7 +672,11 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         agreementId: ctx.agreementId,
         actor: { memberId: ctx.member.id, displayName: ctx.member.displayName },
       });
-      requests.push({ shareId: result.shareId, approveUrl: result.approveUrl });
+      requests.push({
+        shareId: result.shareId,
+        approveUrl: result.approveUrl,
+        paymentMode: result.paymentMode,
+      });
     }
 
     await query(

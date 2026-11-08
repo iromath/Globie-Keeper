@@ -13,7 +13,7 @@ import { query, withTransaction } from '../db/pool.js';
 import { config } from './config.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
-import { createOrder, isPayPalConfigured } from './paypal.js';
+import { createOrder, isPayPalConfigured, paypalMeUrl } from './paypal.js';
 import { cleanupWorkDir, extractReceipt, type MediaInput } from './receipt.js';
 import type {
     AllocationRow,
@@ -21,6 +21,7 @@ import type {
     BillRow,
     ShareRow,
 } from './serialize.js';
+import type { PaymentMode } from './validate.js';
 
 /** Nothing may change a bill once it has been finalized. */
 export const LOCKED = new Set([
@@ -81,7 +82,7 @@ export async function loadShares(billId: string): Promise<ShareRow[]> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url, s.created_at
+            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -100,7 +101,7 @@ export async function loadShareById(shareId: string): Promise<ShareRow> {
     `select s.id, s.bill_id, a.id as agreement_id, a.group_id, g.name as group_name,
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
-            s.paypal_order_id, s.paypal_approve_url, s.created_at
+            s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -293,12 +294,21 @@ export async function startBillParse(input: {
 }
 
 /**
- * Create one PayPal order for one share and persist the approval link.
- * Shared by `POST /bills/:id/request-payments` and the agent tool.
+ * PayPal.Me requests carry no order id, so the payment row gets a synthetic,
+ * stable reference: the share can only be paid once, which makes it a key.
+ */
+export function p2pRef(shareId: string): string {
+  return `p2p:${shareId}`;
+}
+
+/**
+ * Ask one member for one share, using whichever mode the fronter picked.
  *
- * The order names the fronter as payee, so the capture settles into their own
- * PayPal account and the platform never holds the money. A fronter without a
- * linked account blocks collection instead of quietly collecting into ours.
+ * `payee_direct` creates a PayPal order naming the fronter as payee, so the
+ * capture settles into their own account and the platform never holds the
+ * money. `paypal_me` only builds a PayPal.Me link: PayPal exposes no API for
+ * that money request, so the payer confirms it and the server records it.
+ * Shared by `POST /bills/:id/request-payments` and the agent tool.
  */
 export async function requestPaymentForShare(input: {
   share: ShareRow;
@@ -309,26 +319,22 @@ export async function requestPaymentForShare(input: {
   actor: { memberId: string; displayName: string };
 }): Promise<{
   shareId: string;
-  paypalOrderId: string;
-  approveUrl: string;
+  paypalOrderId: string | null;
+  approveUrl: string | null;
+  paymentMode: PaymentMode;
   amount: number;
   currency: string;
 }> {
   const { share } = input;
 
-  if (!isPayPalConfigured()) {
-    throw ApiError.conflict(
-      'paypal_not_configured',
-      'PayPal sandbox credentials are not configured on this server',
-    );
-  }
-
   const { rows: payeeRows } = await query<{
     paypal_email: string | null;
     paypal_merchant_id: string | null;
+    paypal_mode: string;
+    paypal_me_handle: string | null;
     payer_paypal_email: string | null;
   }>(
-    `select m.paypal_email, m.paypal_merchant_id,
+    `select m.paypal_email, m.paypal_merchant_id, m.paypal_mode, m.paypal_me_handle,
             (select u.paypal_email
                from members pm
                join users u on u.id = pm.user_id
@@ -338,8 +344,11 @@ export async function requestPaymentForShare(input: {
       where a.id = $1`,
     [input.agreementId, share.member_id],
   );
+  const payeeMode: PaymentMode =
+    payeeRows[0]?.paypal_mode === 'paypal_me' ? 'paypal_me' : 'payee_direct';
   const payeeEmail = payeeRows[0]?.paypal_email?.trim() ?? null;
   const payeeMerchantId = payeeRows[0]?.paypal_merchant_id?.trim() || null;
+  const payeeHandle = payeeRows[0]?.paypal_me_handle?.trim().replace(/^@/, '') ?? null;
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
 
   if (['paid', 'settled', 'refunded'].includes(share.status)) {
@@ -352,11 +361,81 @@ export async function requestPaymentForShare(input: {
   if (share.status === 'requested' && share.paypal_approve_url) {
     return {
       shareId: share.id,
-      paypalOrderId: share.paypal_order_id ?? '',
+      paypalOrderId: share.paypal_order_id ?? null,
       approveUrl: share.paypal_approve_url,
+      paymentMode: (share.payment_mode as PaymentMode | null) ?? payeeMode,
       amount: share.amount,
       currency: input.currency,
     };
+  }
+
+  if (payeeMode === 'paypal_me') {
+    if (!payeeHandle) {
+      throw ApiError.conflict(
+        'fronter_paypal_missing',
+        'The person who fronted this bill must add their PayPal.Me handle before members can reimburse them',
+      );
+    }
+
+    const link = paypalMeUrl(payeeHandle, share.amount, input.currency);
+    const providerRef = p2pRef(share.id);
+
+    await withTransaction(async (tx) => {
+      await tx.query(
+        `update shares
+            set status = 'requested',
+                paypal_order_id = null,
+                paypal_approve_url = $2,
+                payment_mode = 'paypal_me'
+          where id = $1 and status in ('proposed', 'failed', 'requested')`,
+        [share.id, link],
+      );
+      await tx.query(
+        `insert into payments
+           (share_id, provider, provider_ref, amount, currency, status, raw_payload)
+         values ($1, 'paypal', $2, $3, $4, 'pending', $5::jsonb)
+         on conflict (provider, provider_ref) do update
+           set share_id = excluded.share_id,
+               amount = excluded.amount,
+               currency = excluded.currency,
+               status = 'pending',
+               raw_payload = excluded.raw_payload`,
+        [
+          share.id,
+          providerRef,
+          share.amount,
+          input.currency,
+          JSON.stringify({ paypalMeUrl: link, handle: payeeHandle }),
+        ],
+      );
+      await recordEvent(tx, {
+        groupId: input.groupId,
+        agreementId: input.agreementId,
+        shareId: share.id,
+        memberId: share.member_id,
+        eventType: 'payment.requested',
+        amountMinor: share.amount,
+        currency: input.currency,
+        actor: input.actor.displayName,
+        summary: `PayPal.Me request sent to ${share.member_name}`,
+      });
+    });
+
+    return {
+      shareId: share.id,
+      paypalOrderId: null,
+      approveUrl: link,
+      paymentMode: 'paypal_me',
+      amount: share.amount,
+      currency: input.currency,
+    };
+  }
+
+  if (!isPayPalConfigured()) {
+    throw ApiError.conflict(
+      'paypal_not_configured',
+      'PayPal sandbox credentials are not configured on this server',
+    );
   }
 
   if (!payeeEmail && !payeeMerchantId) {
@@ -394,7 +473,8 @@ export async function requestPaymentForShare(input: {
       `update shares
           set status = 'requested',
               paypal_order_id = $2,
-              paypal_approve_url = $3
+              paypal_approve_url = $3,
+              payment_mode = 'payee_direct'
         where id = $1 and status in ('proposed', 'failed', 'requested')`,
       [share.id, order.id, order.approveUrl],
     );
@@ -433,6 +513,7 @@ export async function requestPaymentForShare(input: {
     shareId: share.id,
     paypalOrderId: order.id,
     approveUrl: order.approveUrl,
+    paymentMode: 'payee_direct',
     amount: share.amount,
     currency: input.currency,
   };
