@@ -140,6 +140,8 @@ export type TipsResponse = {
   currency: Currency;
   frontedBy: string | null;
   frontedByName: string;
+  /** False while the fronter has no PayPal email or merchant id to be paid at. */
+  payoutReady: boolean;
   canTip: boolean;
   /** Sum of tips that actually went through. */
   totalMinor: number;

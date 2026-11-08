@@ -138,9 +138,18 @@ async function buildContext(
       lines.push(
         'tipping: you fronted this bill, so you cannot tip yourself — the others can tip you',
       );
+      if (!fronter.payoutReady) {
+        lines.push(
+          'fronter payout: no PayPal email set — no tip can reach you until you add one in Settings',
+        );
+      }
     } else if (!TIP_OPEN.has(bill.status)) {
       lines.push(
         `tipping: not open yet — tips open once the bill is finalized (bill status: ${bill.status})`,
+      );
+    } else if (!fronter.payoutReady) {
+      lines.push(
+        `tipping: not possible yet — ${fronter.name} has not added a PayPal email, so a tip has nowhere to land`,
       );
     } else {
       lines.push(

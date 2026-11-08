@@ -213,7 +213,11 @@ export default function GroupScreen() {
               onPress={() => onAcceptAgreement(agreement.id)}
               loading={acceptAgreement.isPending}
             />
-          ) : agreed ? (
+          ) : null}
+
+          {/* An existing bill stays reachable while the agreement is still being
+              accepted — its shares, receipt and tip card do not wait on a tap. */}
+          {agreed || bill ? (
             <View style={styles.actions}>
               <Button
                 title={billAction.title}
@@ -227,14 +231,18 @@ export default function GroupScreen() {
                     : router.push({ pathname: '/groups/[id]/bill', params: { id } })
                 }
               />
-              <Button
-                title="Leaderboard"
-                variant="secondary"
-                icon={icon.hero}
-                onPress={() => router.push({ pathname: '/groups/[id]/leaderboard', params: { id } })}
-              />
+              {agreed ? (
+                <Button
+                  title="Leaderboard"
+                  variant="secondary"
+                  icon={icon.hero}
+                  onPress={() =>
+                    router.push({ pathname: '/groups/[id]/leaderboard', params: { id } })
+                  }
+                />
+              ) : null}
             </View>
-          ) : (
+          ) : myAcceptanceMissing ? null : (
             <View style={styles.waiting}>
               <Icon name={icon.time} size={14} color={colors.warn} />
               <Text variant="caption" tone="warn">

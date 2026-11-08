@@ -655,6 +655,12 @@ export default function BillScreen() {
                     />
                   ) : null}
                 </>
+              ) : !tips.data.payoutReady ? (
+                <Text variant="caption" tone="warn">
+                  {tips.data.frontedBy === me?.id
+                    ? 'Add your PayPal email in Settings so the group can tip you.'
+                    : `${tips.data.frontedByName} needs to add a PayPal email before tips can go through.`}
+                </Text>
               ) : tips.data.canTip ? (
                 <View style={styles.chips}>
                   {TIP_PRESETS.map((amountMinor) => (

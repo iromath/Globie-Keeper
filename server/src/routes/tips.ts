@@ -61,6 +61,8 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
       currency: ctx.currency,
       frontedBy: fronter.id,
       frontedByName: fronter.name,
+      // Whether the fronter has somewhere for the money to land.
+      payoutReady: fronter.payoutReady,
       canTip: TIPPABLE.has(ctx.status) && fronter.id !== ctx.member.id,
       totalMinor: tips
         .filter((tip) => tip.status === 'paid')

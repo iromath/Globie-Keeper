@@ -94,13 +94,26 @@ export async function listTips(billId: string): Promise<TipRow[]> {
 /**
  * Who fronted the agreement and what to call them. `fronted_by` is set when the
  * agreement is created; falling back to `created_by` keeps older rows tippable.
+ *
+ * `payoutReady` says whether money can actually reach them: without a PayPal
+ * email (or merchant id) every tip attempt is refused, so the UI needs to know
+ * that before it offers an amount.
  */
-export async function loadFronter(
-  agreementId: string,
-): Promise<{ id: string | null; name: string }> {
-  const { rows } = await query<{ fronted_by: string | null; fronted_name: string }>(
+export async function loadFronter(agreementId: string): Promise<{
+  id: string | null;
+  name: string;
+  payoutReady: boolean;
+}> {
+  const { rows } = await query<{
+    fronted_by: string | null;
+    fronted_name: string;
+    paypal_email: string | null;
+    paypal_merchant_id: string | null;
+  }>(
     `select a.fronted_by,
-            coalesce(fu.display_name, cu.display_name) as fronted_name
+            coalesce(fu.display_name, cu.display_name) as fronted_name,
+            fm.paypal_email,
+            fm.paypal_merchant_id
        from agreements a
        left join members fm on fm.id = a.fronted_by
        left join users fu on fu.id = fm.user_id
@@ -114,6 +127,7 @@ export async function loadFronter(
   return {
     id: row?.fronted_by ?? null,
     name: row?.fronted_name ?? 'the fronter',
+    payoutReady: Boolean(row?.paypal_email?.trim() || row?.paypal_merchant_id?.trim()),
   };
 }
 
