@@ -11,6 +11,10 @@ import type {
     Bill,
     BillKind,
     BillSplitMode,
+    Donation,
+    DonationMethod,
+    DonationSpeciesResponse,
+    DonationsResponse,
     Group,
     LeaderboardRow,
     Member,
@@ -48,6 +52,8 @@ export const queryKeys = {
   myPoints: ['me', 'points'] as const,
   myActivity: ['me', 'activity'] as const,
   myNotifications: ['me', 'notifications'] as const,
+  donations: ['donations'] as const,
+  donationSpecies: ['donations', 'species'] as const,
 };
 
 export function useGroup(groupId: string) {
@@ -243,6 +249,79 @@ export function useMyPoints() {
   return useQuery({
     queryKey: queryKeys.myPoints,
     queryFn: () => request<{ balance: number }>('/me/points'),
+  });
+}
+
+/**
+ * The Globie Fund (DEV_PLAN §2.21). The catalogue comes from the sanctuary
+ * through the API, so the client never talks to `mcp.globie.earth` itself.
+ */
+export function useDonationSpecies() {
+  return useQuery({
+    queryKey: queryKeys.donationSpecies,
+    queryFn: () => request<DonationSpeciesResponse>('/donations/species'),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useDonations() {
+  return useQuery({
+    queryKey: queryKeys.donations,
+    queryFn: () => request<DonationsResponse>('/donations'),
+  });
+}
+
+export type CreateDonationInput = {
+  method: DonationMethod;
+  speciesId: string;
+  speciesName?: string | null;
+  quantity: number;
+  /** PayPal rail: what the payer is charged, in minor units. */
+  amountMinor?: number;
+  /** Points rail: how many Globie to redeem. */
+  points?: number;
+};
+
+/** Opens the donation. The PayPal rail answers with a browser approval link. */
+export function useCreateDonation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateDonationInput) =>
+      request<{ donation: Donation; approveUrl: string | null }>('/donations', { body: input }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.donations }),
+  });
+}
+
+export type CaptureDonationResult = {
+  donation: Donation;
+  alreadyPaid: boolean;
+};
+
+/**
+ * Runs after the browser closes, exactly like a share: the API captures the
+ * order and records the adoption, so settlement never waits on the webhook.
+ */
+export function useCaptureDonation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ donationId }: { donationId: string }) =>
+      request<CaptureDonationResult>(`/donations/${donationId}/capture`, { body: {} }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.donations });
+      client.invalidateQueries({ queryKey: queryKeys.myPoints });
+    },
+    onError: () => client.invalidateQueries({ queryKey: queryKeys.donations }),
+  });
+}
+
+/** Writes the adoption again after the sanctuary was unreachable. */
+export function useRetryAdoption() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ donationId }: { donationId: string }) =>
+      request<{ donation: Donation }>(`/donations/${donationId}/retry-adoption`, { body: {} }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.donations }),
   });
 }
 

@@ -17,6 +17,9 @@ export const icon = {
   sharesOutline: 'wallet-outline',
   activity: 'pulse',
   activityOutline: 'pulse-outline',
+  // A tree is the Globie Fund's one meaning: adopt one, watch it grow (§2.21).
+  leaf: 'leaf',
+  leafOutline: 'leaf-outline',
 
   receipt: 'receipt',
   receiptOutline: 'receipt-outline',

@@ -125,8 +125,8 @@ async function accessToken(): Promise<string> {
   return cachedToken.value;
 }
 
-/** What the money is for: a reimbursement share or a tip for the fronter. */
-export type OrderTarget = { kind: 'share' | 'tip'; id: string };
+/** What the money is for: a share, a tip, or a gift to the Globie Fund. */
+export type OrderTarget = { kind: 'share' | 'tip' | 'donation'; id: string };
 
 /**
  * Who receives the money. The fronter already paid the merchant outside PayPal,

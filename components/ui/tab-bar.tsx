@@ -20,24 +20,26 @@ import { Icon, icon, type IconName } from './icon';
 import { Text } from './text';
 import { colors, maxContentWidth, motion, radius, space } from './theme';
 
-export type TabName = 'index' | 'groups' | 'me/shares' | 'me/activity';
+export type TabName = 'index' | 'groups' | 'donate' | 'me/shares' | 'me/activity';
 
 type Destination = { label: string; glyph: IconName; glyphActive: IconName };
 
-/** Four destinations, one meaning each — the bar never grows by accident. */
+/** Five destinations, one meaning each — the bar never grows by accident. */
 const destinations: Record<TabName, Destination> = {
   index: { label: 'Home', glyph: icon.homeOutline, glyphActive: icon.home },
   groups: { label: 'Groups', glyph: icon.peopleOutline, glyphActive: icon.people },
+  donate: { label: 'Donate', glyph: icon.leafOutline, glyphActive: icon.leaf },
   'me/shares': { label: 'Shares', glyph: icon.sharesOutline, glyphActive: icon.shares },
   'me/activity': { label: 'Activity', glyph: icon.activityOutline, glyphActive: icon.activity },
 };
 
-/** The order the four places appear in, left to right. */
-const order: TabName[] = ['index', 'groups', 'me/shares', 'me/activity'];
+/** The order the five places appear in, left to right. */
+const order: TabName[] = ['index', 'groups', 'donate', 'me/shares', 'me/activity'];
 
 const hrefs: Record<TabName, Href> = {
   index: '/',
   groups: '/groups',
+  donate: '/donate',
   'me/shares': '/me/shares',
   'me/activity': '/me/activity',
 };
@@ -50,6 +52,7 @@ const hrefs: Record<TabName, Href> = {
 export function tabFor(pathname: string): TabName | null {
   if (pathname === '/' || pathname === '') return 'index';
   if (pathname.startsWith('/groups')) return 'groups';
+  if (pathname.startsWith('/donate')) return 'donate';
   if (pathname.startsWith('/me/shares')) return 'me/shares';
   if (pathname.startsWith('/me/activity')) return 'me/activity';
   return null;
@@ -58,7 +61,7 @@ export function tabFor(pathname: string): TabName | null {
 /**
  * The bottom bar. It belongs to the shell rather than to the tabs navigator, so
  * it stays put when a bill or the Hero board is pushed on top of a tab — the
- * four places are always one tap away. The focused capsule is the state; the
+ * five places are always one tap away. The focused capsule is the state; the
  * icon swap (outline to filled) carries the same message without colour, so the
  * bar still reads in greyscale.
  */

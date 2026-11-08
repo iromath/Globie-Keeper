@@ -8,6 +8,7 @@ import { agentRoutes } from './routes/agent.js';
 import { agreementRoutes } from './routes/agreements.js';
 import { authRoutes } from './routes/auth.js';
 import { billRoutes } from './routes/bills.js';
+import { donationRoutes } from './routes/donations.js';
 import { fxRoutes } from './routes/fx.js';
 import { groupRoutes } from './routes/groups.js';
 import { healthRoutes } from './routes/health.js';
@@ -84,6 +85,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(meRoutes, { prefix: '/api' });
   await app.register(shareRoutes, { prefix: '/api' });
   await app.register(tipRoutes, { prefix: '/api' });
+  await app.register(donationRoutes, { prefix: '/api' });
   await app.register(paypalRoutes, { prefix: '/api' });
   await app.register(agentRoutes, { prefix: '/api' });
 

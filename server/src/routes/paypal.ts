@@ -8,6 +8,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 
 import { query } from '../db/pool.js';
 import { config, isProduction } from '../lib/config.js';
+import { failDonation, reverseDonation, settleDonation } from '../lib/donation.js';
 import { ApiError } from '../lib/http-error.js';
 import {
     toMinorAmount,
@@ -96,6 +97,32 @@ async function findTip(candidates: string[]): Promise<TipLookup | null> {
   const { rows } = await query<TipLookup>(
     `select id, amount, currency, status, gross_minor
        from tips
+      where paypal_order_id = any($1::text[])
+         or paypal_capture_id = any($1::text[])
+      order by paid_at desc nulls last
+      limit 1`,
+    [ids],
+  );
+
+  return rows[0] ?? null;
+}
+
+type DonationLookup = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  gross_minor: number | null;
+};
+
+/** A gift to the Globie Fund is its own row too (DEV_PLAN §2.21). */
+async function findDonation(candidates: string[]): Promise<DonationLookup | null> {
+  const ids = candidates.filter((value) => value.length > 0);
+  if (ids.length === 0) return null;
+
+  const { rows } = await query<DonationLookup>(
+    `select id, amount_minor as amount, currency, status, gross_minor
+       from donations
       where paypal_order_id = any($1::text[])
          or paypal_capture_id = any($1::text[])
       order by paid_at desc nulls last
@@ -288,7 +315,51 @@ export const paypalRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    request.log.warn({ eventId, eventType }, 'paypal webhook matched no share or tip');
+    // Still nothing, so this may be a gift to the Globie Fund.
+    const donation = await findDonation(candidates);
+
+    if (donation) {
+      if (!amountMatches(donation)) {
+        request.log.error(
+          { eventId, eventType, donationId: donation.id, resource: resource.amount },
+          'paypal webhook amount does not match the donation',
+        );
+        await markReceived(eventId);
+        return { ok: true, ignored: 'amount_mismatch' };
+      }
+
+      switch (eventType) {
+        case 'PAYMENT.CAPTURE.COMPLETED': {
+          const result = await settleDonation(donation.id, { captureId });
+          await markReceived(eventId);
+          return { ok: true, donation: { id: result.id, mcpStatus: result.mcp_status } };
+        }
+
+        case 'PAYMENT.CAPTURE.DENIED':
+        case 'PAYMENT.CAPTURE.DECLINED': {
+          await failDonation(donation.id);
+          await markReceived(eventId);
+          return { ok: true, failed: donation.id };
+        }
+
+        case 'PAYMENT.CAPTURE.REFUNDED':
+        case 'PAYMENT.CAPTURE.REVERSED': {
+          await reverseDonation(donation.id);
+          await markReceived(eventId);
+          return { ok: true, refunded: donation.id };
+        }
+
+        default: {
+          await markReceived(eventId);
+          return { ok: true, ignored: eventType };
+        }
+      }
+    }
+
+    request.log.warn(
+      { eventId, eventType },
+      'paypal webhook matched no share, tip or donation',
+    );
     await markReceived(eventId);
     return { ok: true, ignored: 'share_not_found' };
   });

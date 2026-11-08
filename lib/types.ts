@@ -182,6 +182,61 @@ export type TipsResponse = {
   tips: Tip[];
 };
 
+/** One tree the sanctuary can register for a gift (DEV_PLAN §2.21). */
+export type DonationSpecies = {
+  id: string;
+  name: string;
+  latin: string | null;
+  /** `critical` / `urgent` come from the sanctuary's own catalogue. */
+  status: 'critical' | 'urgent' | null;
+  blurb: string;
+};
+
+export type DonationMethod = 'paypal' | 'points';
+
+/** How the adoption call to the sanctuary went — independent of the payment. */
+export type AdoptionStatus = 'none' | 'pending' | 'adopted' | 'failed';
+
+/** A gift to the Globie Fund: PayPal money, or Globie points at 1000 = US$1. */
+export type Donation = {
+  id: string;
+  method: DonationMethod;
+  amountMinor: number;
+  currency: Currency;
+  /** Points redeemed on the `points` rail; 0 on the PayPal rail. */
+  pointsSpent: number;
+  speciesId: string;
+  speciesName: string | null;
+  quantity: number;
+  status: 'proposed' | 'requested' | 'paid' | 'refunded' | 'failed';
+  paypalOrderId: string | null;
+  /** Browser approval link; only present while the donation is `requested`. */
+  approveUrl?: string | null;
+  grossMinor: number | null;
+  mcpStatus: AdoptionStatus;
+  /** The sanctuary's deed number, once the adoption is logged. */
+  deedNo: string | null;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+export type DonationSpeciesResponse = {
+  species: DonationSpecies[];
+  currency: Currency;
+  pointsPerUsd: number;
+  minMinor: number;
+  maxMinor: number;
+};
+
+export type DonationsResponse = {
+  donations: Donation[];
+  totalMinor: number;
+  treesAdopted: number;
+  currency: Currency;
+  pointsBalance: number;
+  pointsPerUsd: number;
+};
+
 export type LeaderboardRow = {
   memberId: string;
   memberName: string;

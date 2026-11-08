@@ -160,6 +160,34 @@ export const config = {
   },
   paypalFeeCoverLiveAllowed: bool(process.env.PAYPAL_FEE_COVER_LIVE_ALLOWED, false),
 
+  // --- globie fund ----------------------------------------------------------
+  /**
+   * The Globie Fund (DEV_PLAN §2.21) is a PayPal account we do not own from the
+   * donor's point of view: a donation is an Orders v2 checkout whose payee is
+   * this account. `merchant_id` wins when both are set; the label below is what
+   * the approval sheet shows as the recipient.
+   */
+  globieFundPaypalEmail: process.env.GLOBIE_FUND_PAYPAL_EMAIL ?? '',
+  globieFundPaypalMerchantId: process.env.GLOBIE_FUND_PAYPAL_MERCHANT_ID ?? '',
+  globieFundName: process.env.GLOBIE_FUND_NAME ?? 'Globie Fund',
+  /** Charged currency for the PayPal rail. The points peg is expressed in it. */
+  globieFundCurrency: (process.env.GLOBIE_FUND_CURRENCY ?? 'USD').toUpperCase(),
+  donationMinMinor: int(process.env.DONATION_MIN_MINOR, 100),
+  donationMaxMinor: int(process.env.DONATION_MAX_MINOR, 1_000_000),
+  /** 1000 Globie = US$1, so one point is one tenth of a cent. */
+  pointsPerUsd: int(process.env.POINTS_PER_USD, 1000),
+
+  // --- globie earth MCP -----------------------------------------------------
+  /**
+   * Tree catalogue + adoption writes (DEV_PLAN §2.21). The public host 404s on
+   * `/`; the working transport is JSON-RPC over `POST /mcp` with an
+   * `X-Device-Id` header. An empty token keeps the session anonymous, which is
+   * what the endpoint accepts today.
+   */
+  mcpBaseUrl: process.env.MCP_BASE_URL ?? 'https://mcp.globie.earth/mcp',
+  mcpBearerToken: process.env.MCP_BEARER_TOKEN ?? '',
+  mcpTimeoutMs: int(process.env.MCP_TIMEOUT_MS, 15_000),
+
   // --- fx ------------------------------------------------------------------
   /**
    * Indicative display rates (DEV_PLAN §2.19). PayPal has no public rate

@@ -14,40 +14,72 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import { space } from '@/components/ui/theme';
 import { formatRate } from '@/lib/fx';
-import { useCaptureShare, useCaptureTip } from '@/lib/queries';
-import type { SettledRate } from '@/lib/types';
+import { useCaptureDonation, useCaptureShare, useCaptureTip } from '@/lib/queries';
+import type { Donation, SettledRate } from '@/lib/types';
 
 type CaptureResult = {
-  kind: 'share' | 'tip';
+  kind: 'share' | 'tip' | 'donation';
   points: number;
   rank: number | null;
   settled: boolean;
   settledRate: SettledRate | null;
+  donation?: Donation;
 };
 
 /**
- * PayPal sends the member here after approval (the server adds `share` or `tip`
- * to the return URL, DEV_PLAN §2.18). The page captures the order so settlement
+ * PayPal sends the member here after approval (the server adds `share`, `tip`
+ * or `donation` to the return URL). The page captures the order so settlement
  * does not depend on the webhook arriving first; a failure is retryable.
  */
 export default function PayPalReturnScreen() {
   const params = useLocalSearchParams<{
     share?: string;
     tip?: string;
+    donation?: string;
     cancelled?: string;
   }>();
   const shareId = typeof params.share === 'string' ? params.share : '';
   const tipId = typeof params.tip === 'string' ? params.tip : '';
+  const donationId = typeof params.donation === 'string' ? params.donation : '';
   const cancelled = params.cancelled === '1';
 
   const captureShare = useCaptureShare();
   const captureTip = useCaptureTip();
+  const captureDonation = useCaptureDonation();
   const notify = useMascotToast();
   const started = useRef(false);
   const [result, setResult] = useState<CaptureResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function run() {
+    if (donationId) {
+      captureDonation.mutate(
+        { donationId },
+        {
+          onSuccess: (value) => {
+            setResult({
+              kind: 'donation',
+              points: 0,
+              rank: null,
+              settled: true,
+              settledRate: null,
+              donation: value.donation,
+            });
+            const trees = `${value.donation.quantity} ${
+              value.donation.quantity === 1 ? 'tree' : 'trees'
+            }`;
+            notify({
+              title: value.donation.mcpStatus === 'adopted' ? 'Tree adopted' : 'Gift recorded',
+              body: `${trees} · ${value.donation.speciesName ?? value.donation.speciesId}`,
+            });
+          },
+          onError: (cause) =>
+            setError(cause instanceof Error ? cause.message : 'Could not confirm the donation'),
+        }
+      );
+      return;
+    }
+
     if (tipId) {
       captureTip.mutate(
         { tipId },
@@ -99,20 +131,23 @@ export default function PayPalReturnScreen() {
   }
 
   useEffect(() => {
-    if (cancelled || started.current || (!shareId && !tipId)) return;
+    if (cancelled || started.current || (!shareId && !tipId && !donationId)) return;
     started.current = true;
     run();
-    // `run` closes over the two mutations; the ref makes a re-run a no-op.
+    // `run` closes over the three mutations; the ref makes a re-run a no-op.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shareId, tipId, cancelled]);
+  }, [shareId, tipId, donationId, cancelled]);
 
   function retry() {
     setError(null);
     run();
   }
 
-  const back = () =>
-    result?.kind === 'tip' ? router.replace('/') : router.replace('/me/shares');
+  const back = () => {
+    if (result?.kind === 'tip') return router.replace('/');
+    if (!shareId && !tipId && donationId) return router.replace('/donate');
+    return router.replace('/me/shares');
+  };
 
   // One header for every state: this page replaces rather than pops, so the back
   // control goes through `back` instead of the stack.
@@ -130,22 +165,24 @@ export default function PayPalReturnScreen() {
           icon={icon.close}
           title="Payment cancelled"
           body={
-            tipId
-              ? 'Nothing was charged. Your share is untouched.'
-              : 'Nothing was charged. Your share is still open whenever you are ready.'
+            donationId
+              ? 'Nothing was charged. The tree is still waiting for you at the fund.'
+              : tipId
+                ? 'Nothing was charged. Your share is untouched.'
+                : 'Nothing was charged. Your share is still open whenever you are ready.'
           }
         />
       </Screen>
     );
   }
 
-  if (!shareId && !tipId) {
+  if (!shareId && !tipId && !donationId) {
     return (
       <Screen scroll={false} header={header}>
         <EmptyState
           icon={icon.warning}
           title="Nothing to confirm"
-          body="This link has no payment attached. Open it from the bill or from My shares instead."
+          body="This link has no payment attached. Open it from the bill, the fund, or from My shares instead."
         />
       </Screen>
     );
@@ -164,7 +201,9 @@ export default function PayPalReturnScreen() {
                 icon={icon.refresh}
                 title="Try again"
                 onPress={retry}
-                loading={captureShare.isPending || captureTip.isPending}
+                loading={
+                  captureShare.isPending || captureTip.isPending || captureDonation.isPending
+                }
               />
               <Button
                 variant="secondary"
@@ -181,25 +220,42 @@ export default function PayPalReturnScreen() {
 
   if (result) {
     const tip = result.kind === 'tip';
+    const donation = result.kind === 'donation' ? result.donation : undefined;
+    const trees = donation
+      ? `${donation.quantity} ${donation.quantity === 1 ? 'tree' : 'trees'}`
+      : '';
     return (
       <Screen scroll={false} header={header}>
         <Card tone="accent">
           <SuccessPulse
             title={
-              tip
-                ? 'Tip sent. Kae Na is proud of you.'
-                : result.settled
-                  ? 'Bill settled. Everyone is square.'
-                  : 'Paid.'
+              donation
+                ? donation.mcpStatus === 'adopted'
+                  ? 'Tree adopted.'
+                  : 'Gift recorded.'
+                : tip
+                  ? 'Tip sent. Kae Na is proud of you.'
+                  : result.settled
+                    ? 'Bill settled. Everyone is square.'
+                    : 'Paid.'
             }
             body={
-              tip
-                ? `+${result.points} Globie · the tip goes straight to the fronter.`
-                : result.rank
-                  ? `+${result.points} Globie · you were #${result.rank} to pay.`
-                  : `+${result.points} Globie`
+              donation
+                ? donation.deedNo
+                  ? `Deed ${donation.deedNo} · ${trees}`
+                  : `${trees} adopted. The deed lands shortly.`
+                : tip
+                  ? `+${result.points} Globie · the tip goes straight to the fronter.`
+                  : result.rank
+                    ? `+${result.points} Globie · you were #${result.rank} to pay.`
+                    : `+${result.points} Globie`
             }
           />
+          {donation && donation.pointsSpent > 0 ? (
+            <Text variant="caption" tone="dim" style={styles.rate}>
+              {donation.pointsSpent.toLocaleString()} Globie redeemed
+            </Text>
+          ) : null}
           {result.settledRate ? (
             <Text variant="caption" tone="dim" style={styles.rate}>
               PayPal converted at 1 {result.settledRate.fromCurrency} ={' '}
@@ -208,7 +264,7 @@ export default function PayPalReturnScreen() {
           ) : null}
           <Button
             icon={icon.chevronBack}
-            title={tip ? 'Back to home' : 'Back to my shares'}
+            title={donation ? 'Back to the fund' : tip ? 'Back to home' : 'Back to my shares'}
             onPress={back}
             style={styles.action}
           />

@@ -17,7 +17,7 @@ import { Screen } from '@/components/ui/screen';
 import { SectionHeading } from '@/components/ui/section';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
-import { colors, space } from '@/components/ui/theme';
+import { colors, radius, space } from '@/components/ui/theme';
 import { useMoney } from '@/lib/money-context';
 import { useCreateGroup, useJoinGroup, useMyGroups, useMyPoints, useMyShares } from '@/lib/queries';
 import { useSession } from '@/lib/session-context';
@@ -122,6 +122,28 @@ export default function HomeScreen() {
         />
         <Stat glyph={icon.receipt} label="Open" value={String(openShares.length)} hint="unsettled bills" />
       </View>
+
+      <Card>
+        <View style={styles.fundRow}>
+          <View style={styles.fundGlyph}>
+            <Icon name={icon.leaf} size={20} color={colors.accent} />
+          </View>
+          <View style={styles.fundCopy}>
+            <Text variant="label">The Globie Fund</Text>
+            <Text variant="caption" tone="muted">
+              Adopt a tree in the Isaan sanctuary — with PayPal or your Globie.
+            </Text>
+          </View>
+          <Button
+            compact
+            variant="secondary"
+            title="Give"
+            icon={icon.chevronRight}
+            iconSide="right"
+            onPress={() => router.push('/donate')}
+          />
+        </View>
+      </Card>
 
       {myGroups.length > 0 || groups.isLoading || groups.error ? (
         <View style={styles.section}>
@@ -321,6 +343,16 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: 'row', gap: space.md },
   tile: { flex: 1, gap: space.xs },
   tileTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  fundRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  fundGlyph: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.wash,
+  },
+  fundCopy: { flex: 1, gap: space.xs },
   section: { gap: space.md },
   sectionHeader: {
     flexDirection: 'row',
