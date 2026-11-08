@@ -75,13 +75,29 @@ async function storeSession(payload: SessionPayload): Promise<StoredSession> {
 }
 
 /**
- * Exchange an email for a session token. The API creates the user on first use,
- * which keeps the hackathon demo free of a password flow.
+ * Exchange an email + password for a session token. Passing `displayName`
+ * turns the call into a sign-up; without it an unknown address is rejected,
+ * so the API never creates an account nobody asked for.
  */
-export async function signIn(email: string, displayName: string): Promise<StoredSession> {
+export async function signIn(
+  email: string,
+  password: string,
+  displayName?: string
+): Promise<StoredSession> {
   return storeSession(
-    await request<SessionPayload>('/auth/session', { body: { email, displayName } })
+    await request<SessionPayload>('/auth/session', {
+      body: displayName ? { email, password, displayName } : { email, password },
+    })
   );
+}
+
+/** Drop the token on the server too; the local copy is cleared by the caller. */
+export async function signOutRequest(): Promise<void> {
+  try {
+    await request<void>('/auth/logout', { method: 'POST' });
+  } catch {
+    // Signing out must work offline — the local token is discarded regardless.
+  }
 }
 
 /**

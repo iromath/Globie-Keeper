@@ -68,7 +68,7 @@ export default function RootLayout() {
 }
 
 /**
- * A tap on a reminder lands on the table it is about: the payload carries the
+ * A tap on a reminder lands on the group it is about: the payload carries the
  * bill and its group, so the member does not have to hunt for it (§2.13).
  */
 function useNotificationTaps(enabled: boolean) {

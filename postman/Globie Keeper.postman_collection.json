@@ -38,7 +38,7 @@
     },
     {
       "name": "01 · Auth",
-      "description": "Passwordless sessions. `POST /auth/session` needs both `email` and `displayName` and returns an opaque bearer token; every later request uses it.",
+      "description": "Email + password sessions. `POST /auth/session` always needs `email` and `password`; adding `displayName` creates the account, omitting it signs in to an existing one and rejects an unknown address. Returns an opaque bearer token; every later request uses it.",
       "item": [
         {
           "name": "Sign in — Ana (owner, fronter)",
@@ -65,7 +65,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"ana@example.com\",\n  \"displayName\": \"Ana\"\n}",
+              "raw": "{\n  \"email\": \"ana@example.com\",\n  \"password\": \"{{demoPassword}}\",\n  \"displayName\": \"Ana\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/auth/session",
@@ -92,7 +92,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"ben@example.com\",\n  \"displayName\": \"Ben\"\n}",
+              "raw": "{\n  \"email\": \"ben@example.com\",\n  \"password\": \"{{demoPassword}}\",\n  \"displayName\": \"Ben\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/auth/session",
@@ -119,7 +119,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"chai@example.com\",\n  \"displayName\": \"Chai\"\n}",
+              "raw": "{\n  \"email\": \"chai@example.com\",\n  \"password\": \"{{demoPassword}}\",\n  \"displayName\": \"Chai\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/auth/session",

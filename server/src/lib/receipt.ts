@@ -45,7 +45,7 @@ export type ExtractionResult = {
 
 const CURRENCY = /^[A-Z]{3}$/;
 
-const SYSTEM_PROMPT = `You read restaurant receipts and return JSON only.
+const SYSTEM_PROMPT = `You read bills — receipts, invoices, order confirmations, tickets, utility statements — and return JSON only.
 Schema:
 {
   "merchant": string|null,

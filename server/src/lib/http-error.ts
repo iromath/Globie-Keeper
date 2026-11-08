@@ -29,4 +29,8 @@ export class ApiError extends Error {
   static conflict(code: string, message: string): ApiError {
     return new ApiError(409, code, message);
   }
+
+  static tooManyRequests(message: string): ApiError {
+    return new ApiError(429, 'too_many_requests', message);
+  }
 }

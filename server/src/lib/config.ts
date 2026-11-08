@@ -82,6 +82,13 @@ export const config = {
   sessionTtlDays: int(process.env.SESSION_TTL_DAYS, 60),
   autoMigrate: bool(process.env.AUTO_MIGRATE, true),
 
+  /**
+   * Guessing ceiling for `/auth/session` (per email) and `/groups/join`
+   * (per user). The per-IP ceiling for sign-in is five times this.
+   */
+  authAttemptLimit: int(process.env.AUTH_ATTEMPT_LIMIT, 20),
+  authAttemptWindowMs: int(process.env.AUTH_ATTEMPT_WINDOW_MS, 10 * 60_000),
+
   /** Comma separated extra origins; the public origin and localhost are always allowed. */
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')

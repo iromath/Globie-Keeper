@@ -119,7 +119,7 @@ export default function GroupScreen() {
     <Screen
       header={{
         title: group.data.group.name,
-        subtitle: `${members.length} at the table · ${currency}`,
+        subtitle: `${members.length} in the group · ${currency}`,
         back: true,
       }}
       bottomInset={space.xl}
@@ -130,7 +130,7 @@ export default function GroupScreen() {
         <SectionHeading
           glyph={icon.people}
           title="Who is in"
-          hint={`${members.length} at the table`}
+          hint={`${members.length} in the group`}
         />
         <View style={styles.memberChips}>
           {members.map((member) => {

@@ -113,10 +113,17 @@ export function mapAgreement(row: AgreementRow) {
   };
 }
 
+import type { BillKind, BillSplitMode } from './validate.js';
+
+export type { BillKind, BillSplitMode };
+
 export type BillRow = {
   id: string;
   agreement_id: string;
   merchant: string | null;
+  title?: string | null;
+  kind?: string;
+  split_mode?: string;
   currency: string;
   subtotal: number;
   tax: number;
@@ -149,11 +156,33 @@ export function mapBillItem(row: BillItemRow) {
   };
 }
 
-export function mapBill(row: BillRow, items: BillItemRow[]) {
+export type BillSplitEntryRow = {
+  bill_id: string;
+  member_id: string;
+  amount: number | null;
+  weight: number | string | null;
+};
+
+export function mapBillSplitEntry(row: BillSplitEntryRow) {
+  return {
+    memberId: row.member_id,
+    amountMinor: row.amount,
+    weight: row.weight === null ? null : numeric(row.weight),
+  };
+}
+
+export function mapBill(
+  row: BillRow,
+  items: BillItemRow[],
+  splitEntries: BillSplitEntryRow[] = [],
+) {
   return {
     id: row.id,
     agreementId: row.agreement_id,
     merchant: row.merchant,
+    title: row.title ?? null,
+    kind: (row.kind ?? 'other') as BillKind,
+    splitMode: (row.split_mode ?? 'item') as BillSplitMode,
     currency: row.currency.trim(),
     subtotalMinor: row.subtotal,
     taxMinor: row.tax,
@@ -163,6 +192,7 @@ export function mapBill(row: BillRow, items: BillItemRow[]) {
     totalMinor: row.total,
     status: row.status,
     items: items.map(mapBillItem),
+    splitEntries: splitEntries.map(mapBillSplitEntry),
     framesExtracted: row.frames_extracted,
     warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
   };

@@ -12,9 +12,12 @@
 
 import { closePool, withTransaction } from '../server/src/db/pool.js';
 import { allocate } from '../server/src/lib/money.js';
+import { hashPassword } from '../server/src/lib/password.js';
 
 const CURRENCY = 'THB';
 const INVITE_TOKEN = 'KHAOSI';
+/** Shared password for the three demo accounts; printed at the end of the run. */
+const DEMO_PASSWORD = 'globie-demo';
 
 const ACCOUNTS = [
   { key: 'ana', email: 'ana@example.com', name: 'Ana', role: 'owner' },
@@ -139,12 +142,14 @@ async function seed(): Promise<void> {
     await clearDemo(tx);
 
     const userIds = new Map<AccountKey, string>();
+    // Hashing once is fine: all three demo accounts share the same password.
+    const passwordHash = await hashPassword(DEMO_PASSWORD);
     for (const account of ACCOUNTS) {
       const { rows } = await tx.query<{ id: string }>(
-        `insert into users (email, display_name, timezone, whatsapp_number)
-         values ($1, $2, 'Asia/Bangkok', null)
+        `insert into users (email, display_name, timezone, whatsapp_number, password_hash, password_updated_at)
+         values ($1, $2, 'Asia/Bangkok', null, $3, now())
          returning id`,
-        [account.email, account.name],
+        [account.email, account.name, passwordHash],
       );
       userIds.set(account.key, rows[0]!.id);
     }
@@ -493,7 +498,9 @@ async function seed(): Promise<void> {
 async function main(): Promise<void> {
   try {
     await seed();
-    console.log('[seed] done. Sign in as ana@example.com, ben@example.com or chai@example.com.');
+    console.log(
+      `[seed] done. Sign in as ana@example.com, ben@example.com or chai@example.com — password ${DEMO_PASSWORD}`,
+    );
   } catch (error) {
     console.error('[seed] failed', error);
     process.exitCode = 1;

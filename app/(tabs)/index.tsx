@@ -59,7 +59,7 @@ export default function HomeScreen() {
     });
     setGroupName('');
     notify({
-      title: 'Table opened',
+      title: 'Group opened',
       body: `${result.group.name} is ready for the crew.`,
     });
     router.push({ pathname: '/groups/[id]', params: { id: result.group.id } });
@@ -83,7 +83,7 @@ export default function HomeScreen() {
     <Screen
       header={{
         title: `Hey, ${firstName}`,
-        subtitle: 'Globie is keeping the table honest.',
+        subtitle: 'Globie is keeping the split honest.',
         action: (
           <View style={styles.headerActions}>
             <CurrencyPill />
@@ -126,7 +126,7 @@ export default function HomeScreen() {
       {myGroups.length > 0 || groups.isLoading || groups.error ? (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text variant="title">Your tables</Text>
+            <Text variant="title">Your groups</Text>
             <Link href="/groups" asChild>
               <Button variant="ghost" compact title="See all" icon={icon.chevronRight} iconSide="right" />
             </Link>
@@ -170,7 +170,7 @@ export default function HomeScreen() {
       ) : null}
 
       <Card>
-        <SectionHeading glyph={icon.people} title="Start a dinner" hint="Open a table and invite the crew." />
+        <SectionHeading glyph={icon.people} title="Start a group" hint="Open a group and invite the crew." />
         <Field
           label="Group name"
           value={groupName}
@@ -253,7 +253,7 @@ export default function HomeScreen() {
           <EmptyState
             icon={icon.checkCircle}
             title="Nothing outstanding"
-            body="Front a meal and you take the Hero crown."
+            body="Front a bill and you take the Hero crown."
           />
         ) : (
           <View style={styles.list}>

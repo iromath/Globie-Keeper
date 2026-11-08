@@ -81,7 +81,7 @@ export default function ActivityScreen() {
     <Screen
       header={{
         title: 'Activity',
-        subtitle: 'Every move across your tables.',
+        subtitle: 'Every move across your groups.',
         action: (
           <IconButton
             name={icon.settingsOutline}

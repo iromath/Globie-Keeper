@@ -8,7 +8,7 @@ import {
     type ReactNode,
 } from 'react';
 
-import { completePayPalHandoff, signIn as signInRequest } from './api';
+import { completePayPalHandoff, signIn as signInRequest, signOutRequest } from './api';
 import { startPayPalLogin, type PayPalLoginOutcome } from './paypal-login';
 import { registerForPush, unregisterPush } from './push';
 import { clearSession, getSession, type StoredSession } from './session';
@@ -16,7 +16,8 @@ import { clearSession, getSession, type StoredSession } from './session';
 type SessionState = {
   session: StoredSession | null;
   ready: boolean;
-  signIn: (email: string, displayName: string) => Promise<void>;
+  /** Sign in, or create the account when `displayName` is present. */
+  signIn: (email: string, password: string, displayName?: string) => Promise<void>;
   /** Opens PayPal's consent page; native resolves with the outcome in place. */
   signInWithPayPal: () => Promise<PayPalLoginOutcome>;
   /** Web return page: trade the one-time code from the redirect. */
@@ -47,8 +48,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = useCallback(async (email: string, displayName: string) => {
-    const next = await signInRequest(email, displayName);
+  const signIn = useCallback(async (email: string, password: string, displayName?: string) => {
+    const next = await signInRequest(email, password, displayName);
     setSessionState(next);
     // Fire-and-forget: a declined prompt or a missing EAS project must never
     // hold up the member getting into the app.
@@ -73,6 +74,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     // The token has to be dropped while the session is still valid.
+    await signOutRequest();
     await unregisterPush();
     await clearSession();
     setSessionState(null);

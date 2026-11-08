@@ -13,7 +13,7 @@ import { space } from '@/components/ui/theme';
 import { useMyGroups } from '@/lib/queries';
 
 /**
- * Every table this account belongs to. A group is only reachable from here or
+ * Every group this account belongs to. A group is only reachable from here or
  * from a share, so this is what keeps memberships findable after a sign-out.
  */
 export default function MyGroupsScreen() {
@@ -26,8 +26,8 @@ export default function MyGroupsScreen() {
         title: 'Groups',
         subtitle:
           all.length === 0
-            ? 'Open a table or join one with a code.'
-            : `${all.length} ${all.length === 1 ? 'table' : 'tables'} you belong to`,
+            ? 'Open a group or join one with a code.'
+            : `${all.length} ${all.length === 1 ? 'group' : 'groups'} you belong to`,
       }}
     >
       {groups.isLoading ? (
@@ -54,8 +54,8 @@ export default function MyGroupsScreen() {
       ) : all.length === 0 ? (
         <EmptyState
           icon={icon.peopleOutline}
-          title="No tables yet"
-          body="Start a dinner from Home or join one with an invite code, and it lands here."
+          title="No groups yet"
+          body="Start a group from Home or join one with an invite code, and it lands here."
           action={
             <Button
               variant="secondary"

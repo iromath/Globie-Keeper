@@ -5,7 +5,7 @@ import path from 'node:path';
 import '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 
-import { query, withTransaction } from '../db/pool.js';
+import { query, withTransaction, type Db } from '../db/pool.js';
 import {
     requireAgreementMember,
     requireBillMember,
@@ -34,9 +34,21 @@ import {
 } from '../lib/serialize.js';
 import { reconcileShare } from '../lib/settlement.js';
 import type { PaymentMode } from '../lib/validate.js';
-import { asRecord, currencyCode, pathUuid, requiredUuid } from '../lib/validate.js';
+import {
+    asRecord,
+    currencyCode,
+    optionalBillKind,
+    optionalSplitMode,
+    optionalString,
+    pathUuid,
+    requiredMinor,
+    requiredString,
+    requiredUuid,
+    requiredWeight
+} from '../lib/validate.js';
 
 type BillParams = { Params: { id: string } };
+type BillItemParams = { Params: { id: string; itemId: string } };
 type AllocationParams = { Params: { id: string } };
 
 /** Bills in these states can still be re-split. */
@@ -106,6 +118,45 @@ async function loadAllocation(allocationId: string): Promise<AllocationRow> {
   return row;
 }
 
+/** A line quantity: up to two decimals, so half a portion is expressible. */
+function itemQty(source: Record<string, unknown>, fallback = 1): number {
+  const value = source.qty;
+  if (value === undefined || value === null) return fallback;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value > 999
+  ) {
+    throw ApiError.badRequest('invalid_qty', 'qty must be between 0 and 999');
+  }
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * The lines changed, so the total and any split built from them are stale.
+ * The bill goes back to PARSED and the fronter re-assigns.
+ */
+async function rebuildBillFromItems(tx: Db, billId: string): Promise<void> {
+  await tx.query(
+    `delete from allocations
+      where bill_item_id in (select id from bill_items where bill_id = $1)`,
+    [billId],
+  );
+  await tx.query(
+    `update bills b
+        set subtotal = items.item_sum,
+            total = items.item_sum + b.tax + b.service_charge + b.tip - b.discount,
+            status = 'PARSED',
+            version = b.version + 1
+       from (select coalesce(sum(line_total), 0)::bigint as item_sum
+               from bill_items
+              where bill_id = $1) items
+      where b.id = $1`,
+    [billId],
+  );
+}
+
 export const billRoutes: FastifyPluginAsync = async (app) => {
   /** Start a bill for an agreement. The receipt arrives in the next call. */
   app.post('/bills', async (request) => {
@@ -121,13 +172,16 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
 
     const currency =
       body.currency === undefined ? ctx.currency : currencyCode(body.currency);
+    const title = optionalString(body, 'title', 120);
+    const kind = optionalBillKind(body) ?? 'other';
+    const splitMode = optionalSplitMode(body) ?? 'item';
 
     const { rows } = await query<BillRow>(
-      `insert into bills (agreement_id, currency, status)
-       values ($1, $2, 'UPLOADED')
-       returning id, agreement_id, merchant, currency, subtotal, tax, service_charge,
-                 tip, discount, total, status, warnings, frames_extracted`,
-      [agreementId, currency],
+      `insert into bills (agreement_id, currency, status, title, kind, split_mode)
+       values ($1, $2, 'UPLOADED', $3, $4, $5)
+       returning id, agreement_id, merchant, title, kind, split_mode, currency, subtotal, tax,
+                 service_charge, tip, discount, total, status, warnings, frames_extracted`,
+      [agreementId, currency, title, kind, splitMode],
     );
     const bill = rows[0];
     if (!bill) throw new ApiError(500, 'bill_insert_failed', 'Could not open the bill');
@@ -141,7 +195,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         eventType: 'bill.created',
         currency,
         actor: ctx.member.displayName,
-        summary: `${ctx.member.displayName} is capturing the receipt`,
+        summary: `${ctx.member.displayName} started a bill`,
       },
     );
 
@@ -286,7 +340,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     const reconciled = mine ? await reconcileShare(mine) : null;
 
     return {
-      bill: mapBill(bill.bill, bill.items),
+      bill: mapBill(bill.bill, bill.items, bill.splitEntries),
       allocations: allocations.map(mapAllocation),
       shares: shares.map((share) =>
         share === mine && reconciled
@@ -307,40 +361,68 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const body = asRecord(request.body);
+    const title = optionalString(body, 'title', 120);
+    const kind = optionalBillKind(body);
+    const splitMode = optionalSplitMode(body);
+
     const raw = body.allocations;
-    if (!Array.isArray(raw)) {
-      throw ApiError.badRequest('invalid_allocations', 'allocations must be an array');
+    const rawEntries = body.splitEntries;
+    if (rawEntries !== undefined && !Array.isArray(rawEntries)) {
+      throw ApiError.badRequest(
+        'invalid_splitEntries',
+        'splitEntries must be an array',
+      );
     }
-    if (raw.length > 500) {
-      throw ApiError.badRequest('invalid_allocations', 'Too many allocations in one request');
+    const hasAllocations = raw !== undefined;
+    const hasSplitEntries = Array.isArray(rawEntries);
+
+    if (!hasAllocations && !hasSplitEntries && !title && !kind && !splitMode) {
+      throw ApiError.badRequest(
+        'nothing_to_update',
+        'Send allocations, splitEntries or the bill details',
+      );
+    }
+    if (hasSplitEntries && splitMode !== 'equal' && splitMode !== 'custom' && splitMode !== 'percent') {
+      throw ApiError.badRequest(
+        'invalid_splitMode',
+        'splitEntries need splitMode equal, custom or percent',
+      );
     }
 
-    const entries = raw.map((entry) => {
-      const record = asRecord(entry);
-      const billItemId = requiredUuid(record, 'billItemId');
-      const memberId = requiredUuid(record, 'memberId');
-      const qtyValue = record.qty;
-      const qty =
-        typeof qtyValue === 'number' && Number.isFinite(qtyValue) && qtyValue > 0
-          ? Math.min(Math.round(qtyValue * 100) / 100, 99)
-          : 1;
-      return { billItemId, memberId, qty };
-    });
+    let entries: { billItemId: string; memberId: string; qty: number }[] = [];
+    if (hasAllocations) {
+      if (!Array.isArray(raw)) {
+        throw ApiError.badRequest('invalid_allocations', 'allocations must be an array');
+      }
+      if (raw.length > 500) {
+        throw ApiError.badRequest('invalid_allocations', 'Too many allocations in one request');
+      }
 
-    const { rows: itemRows } = await query<BillItemTotalRow>(
-      `select id, line_total from bill_items where bill_id = $1`,
-      [billId],
-    );
-    if (itemRows.length === 0) {
-      throw ApiError.conflict('bill_empty', 'This bill has no items yet');
+      entries = raw.map((entry) => {
+        const record = asRecord(entry);
+        const billItemId = requiredUuid(record, 'billItemId');
+        const memberId = requiredUuid(record, 'memberId');
+        return { billItemId, memberId, qty: itemQty(record) };
+      });
     }
-    const lineTotals = new Map(itemRows.map((row) => [row.id, row.line_total]));
 
     const { rows: memberRows } = await query<{ id: string }>(
       `select id from members where group_id = $1 and status <> 'removed'`,
       [ctx.groupId],
     );
     const memberIds = new Set(memberRows.map((row) => row.id));
+
+    const lineTotals = new Map<string, number>();
+    if (hasAllocations) {
+      const { rows: itemRows } = await query<BillItemTotalRow>(
+        `select id, line_total from bill_items where bill_id = $1`,
+        [billId],
+      );
+      if (itemRows.length === 0) {
+        throw ApiError.conflict('bill_empty', 'This bill has no items yet');
+      }
+      for (const row of itemRows) lineTotals.set(row.id, row.line_total);
+    }
 
     const grouped = new Map<
       string,
@@ -366,37 +448,80 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       grouped.set(entry.billItemId, list);
     }
 
+    const splitEntries = hasSplitEntries
+      ? (rawEntries as unknown[]).map((entry) => {
+          const record = asRecord(entry);
+          const memberId = requiredUuid(record, 'memberId');
+          if (!memberIds.has(memberId)) {
+            throw ApiError.badRequest(
+              'invalid_memberId',
+              'A member does not belong to this group',
+            );
+          }
+          return {
+            memberId,
+            amount: splitMode === 'custom' ? requiredMinor(record, 'amountMinor') : null,
+            weight: splitMode === 'percent' ? requiredWeight(record, 'weight') : null,
+          };
+        })
+      : [];
+
     await withTransaction(async (tx) => {
       await tx.query(
-        `delete from allocations
-          where bill_item_id in (select id from bill_items where bill_id = $1)`,
-        [billId],
+        `update bills
+            set title = coalesce($2, title),
+                kind = coalesce($3, kind),
+                split_mode = coalesce($4, split_mode)
+          where id = $1`,
+        [billId, title, kind, splitMode],
       );
 
-      for (const [billItemId, list] of grouped) {
-        const lineTotal = lineTotals.get(billItemId) ?? 0;
-        const parts = allocate(
-          lineTotal,
-          list.map((item) => item.qty),
+      if (hasAllocations) {
+        await tx.query(
+          `delete from allocations
+            where bill_item_id in (select id from bill_items where bill_id = $1)`,
+          [billId],
         );
 
-        for (let index = 0; index < list.length; index += 1) {
-          const entry = list[index];
-          if (!entry) continue;
+        for (const [billItemId, list] of grouped) {
+          const lineTotal = lineTotals.get(billItemId) ?? 0;
+          const parts = allocate(
+            lineTotal,
+            list.map((item) => item.qty),
+          );
+
+          for (let index = 0; index < list.length; index += 1) {
+            const entry = list[index];
+            if (!entry) continue;
+            await tx.query(
+              `insert into allocations (bill_item_id, member_id, qty, amount, status)
+               values ($1, $2, $3, $4, 'proposed')`,
+              [billItemId, entry.memberId, entry.qty, parts[index] ?? 0],
+            );
+          }
+        }
+      }
+
+      if (hasSplitEntries) {
+        await tx.query(`delete from bill_split_entries where bill_id = $1`, [billId]);
+
+        for (const entry of splitEntries) {
           await tx.query(
-            `insert into allocations (bill_item_id, member_id, qty, amount, status)
-             values ($1, $2, $3, $4, 'proposed')`,
-            [billItemId, entry.memberId, entry.qty, parts[index] ?? 0],
+            `insert into bill_split_entries (bill_id, member_id, amount, weight)
+             values ($1, $2, $3, $4)`,
+            [billId, entry.memberId, entry.amount, entry.weight],
           );
         }
       }
 
-      await tx.query(
-        `update bills
-            set status = 'ALLOCATED', version = version + 1
-          where id = $1 and status in ${EDITABLE}`,
-        [billId],
-      );
+      if (hasAllocations || hasSplitEntries) {
+        await tx.query(
+          `update bills
+              set status = 'ALLOCATED', version = version + 1
+            where id = $1 and status in ${EDITABLE}`,
+          [billId],
+        );
+      }
 
       await recordEvent(tx, {
         groupId: ctx.groupId,
@@ -405,12 +530,112 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
         eventType: 'bill.allocated',
         currency: ctx.currency,
         actor: ctx.member.displayName,
-        summary: `${ctx.member.displayName} split the bill — each member confirms their own lines`,
+        summary: `${ctx.member.displayName} set how the bill is shared`,
       });
     });
 
     const allocations = await loadAllocations(billId);
     return { allocations: allocations.map(mapAllocation) };
+  });
+
+  /** Add a line by hand — a bill does not need a photo. */
+  app.post<BillParams>('/bills/:id/items', async (request) => {
+    const billId = pathUuid(request.params.id);
+    const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
+
+    if (LOCKED.has(ctx.status)) {
+      throw ApiError.conflict('bill_locked', 'This bill is already locked');
+    }
+
+    const body = asRecord(request.body);
+    const name = requiredString(body, 'name', { max: 120 });
+    const qty = itemQty(body);
+    const unitPriceMinor = requiredMinor(body, 'unitPriceMinor');
+
+    await withTransaction(async (tx) => {
+      await tx.query(
+        `insert into bill_items (bill_id, name, qty, unit_price, line_total)
+         values ($1, $2, $3, $4, round($3::numeric * $4::bigint)::bigint)`,
+        [billId, name, qty, unitPriceMinor],
+      );
+      await rebuildBillFromItems(tx, billId);
+
+      await recordEvent(tx, {
+        groupId: ctx.groupId,
+        agreementId: ctx.agreementId,
+        memberId: ctx.member.id,
+        eventType: 'bill.item_added',
+        currency: ctx.currency,
+        actor: ctx.member.displayName,
+        summary: `${ctx.member.displayName} added “${name}”`,
+      });
+    });
+
+    const loaded = await loadBill(billId);
+    return { bill: mapBill(loaded.bill, loaded.items, loaded.splitEntries) };
+  });
+
+  /** Replace one line's name, quantity and unit price. */
+  app.patch<BillItemParams>('/bills/:id/items/:itemId', async (request) => {
+    const billId = pathUuid(request.params.id);
+    const itemId = pathUuid(request.params.itemId, 'itemId');
+    const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
+
+    if (LOCKED.has(ctx.status)) {
+      throw ApiError.conflict('bill_locked', 'This bill is already locked');
+    }
+
+    const body = asRecord(request.body);
+    const name = requiredString(body, 'name', { max: 120 });
+    const qty = itemQty(body);
+    const unitPriceMinor = requiredMinor(body, 'unitPriceMinor');
+
+    await withTransaction(async (tx) => {
+      const result = await tx.query(
+        `update bill_items
+            set name = $3,
+                qty = $4,
+                unit_price = $5,
+                line_total = round($4::numeric * $5::bigint)::bigint
+          where id = $2 and bill_id = $1`,
+        [billId, itemId, name, qty, unitPriceMinor],
+      );
+      if (result.rowCount === 0) {
+        throw ApiError.notFound('Line not found');
+      }
+      await rebuildBillFromItems(tx, billId);
+    });
+
+    const loaded = await loadBill(billId);
+    return { bill: mapBill(loaded.bill, loaded.items, loaded.splitEntries) };
+  });
+
+  /** Remove a line; the total shrinks with it. */
+  app.delete<BillItemParams>('/bills/:id/items/:itemId', async (request) => {
+    const billId = pathUuid(request.params.id);
+    const itemId = pathUuid(request.params.itemId, 'itemId');
+    const ctx = await requireBillMember(request, billId);
+    requireFronter(ctx);
+
+    if (LOCKED.has(ctx.status)) {
+      throw ApiError.conflict('bill_locked', 'This bill is already locked');
+    }
+
+    await withTransaction(async (tx) => {
+      const result = await tx.query(
+        `delete from bill_items where id = $2 and bill_id = $1`,
+        [billId, itemId],
+      );
+      if (result.rowCount === 0) {
+        throw ApiError.notFound('Line not found');
+      }
+      await rebuildBillFromItems(tx, billId);
+    });
+
+    const loaded = await loadBill(billId);
+    return { bill: mapBill(loaded.bill, loaded.items, loaded.splitEntries) };
   });
 
   /** A member confirms only the lines assigned to them. Idempotent. */
@@ -526,7 +751,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     if (current.bill.status === 'FINALIZED' || current.bill.status === 'COLLECTING') {
       const shares = await loadShares(billId);
       return {
-        bill: mapBill(current.bill, current.items),
+        bill: mapBill(current.bill, current.items, current.splitEntries),
         shares: shares.map((share) => mapShare(share)),
       };
     }
@@ -544,7 +769,7 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     const [bill, shares] = await Promise.all([loadBill(billId), loadShares(billId)]);
 
     return {
-      bill: mapBill(bill.bill, bill.items),
+      bill: mapBill(bill.bill, bill.items, bill.splitEntries),
       shares: shares.map((share) => mapShare(share)),
     };
   });

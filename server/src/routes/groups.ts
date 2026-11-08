@@ -2,9 +2,11 @@ import type { FastifyPluginAsync } from 'fastify';
 
 import { isUniqueViolation, query, withTransaction } from '../db/pool.js';
 import { requireMember } from '../lib/access.js';
+import { config } from '../lib/config.js';
 import { ApiError } from '../lib/http-error.js';
 import { createInviteCode } from '../lib/ids.js';
 import { recordEvent } from '../lib/ledger.js';
+import { consume } from '../lib/throttle.js';
 import {
     mapAgreement,
     mapBill,
@@ -14,6 +16,7 @@ import {
     type AgreementRow,
     type BillItemRow,
     type BillRow,
+    type BillSplitEntryRow,
     type GroupRow,
     type MemberRow,
 } from '../lib/serialize.js';
@@ -87,7 +90,11 @@ async function loadLatestAgreement(
 
 async function loadLatestBill(
   groupId: string,
-): Promise<{ bill: BillRow; items: BillItemRow[] } | null> {
+): Promise<{
+  bill: BillRow;
+  items: BillItemRow[];
+  splitEntries: BillSplitEntryRow[];
+} | null> {
   const { rows } = await query<BillRow>(
     `select b.*
        from bills b
@@ -105,7 +112,14 @@ async function loadLatestBill(
        from bill_items where bill_id = $1 order by created_at asc`,
     [bill.id],
   );
-  return { bill, items: items.rows };
+  const splitEntries = await query<BillSplitEntryRow>(
+    `select bill_id, member_id, amount, weight
+       from bill_split_entries
+      where bill_id = $1
+      order by created_at asc`,
+    [bill.id],
+  );
+  return { bill, items: items.rows, splitEntries: splitEntries.rows };
 }
 
 export const groupRoutes: FastifyPluginAsync = async (app) => {
@@ -170,6 +184,19 @@ export const groupRoutes: FastifyPluginAsync = async (app) => {
     const inviteToken = requiredString(body, 'inviteToken', { min: 4, max: 16 })
       .toUpperCase();
     const displayName = requiredString(body, 'displayName', { min: 1, max: 80 });
+
+    // A 6-character invite is guessable; the ceiling makes brute force useless.
+    if (
+      !consume(
+        `join:${auth.userId}`,
+        config.authAttemptLimit,
+        config.authAttemptWindowMs,
+      )
+    ) {
+      throw ApiError.tooManyRequests(
+        'Too many join attempts. Wait a few minutes and try again.',
+      );
+    }
 
     const { rows: groupRows } = await query<GroupRow>(
       `select id, name, default_currency, owner_id, invite_token, created_at
@@ -292,7 +319,9 @@ export const groupRoutes: FastifyPluginAsync = async (app) => {
       group: mapGroup(group),
       members: members.map(mapMember),
       agreement: agreementRow ? mapAgreement(agreementRow) : null,
-      bill: billRow ? mapBill(billRow.bill, billRow.items) : null,
+      bill: billRow
+        ? mapBill(billRow.bill, billRow.items, billRow.splitEntries)
+        : null,
       me: mapMember(me),
     };
   });

@@ -342,9 +342,26 @@ function agentReply(tool, confirmToken) {
 function route(method, path, body) {
   if (method === 'GET' && path === '/api/health') return { ok: true };
 
+  // Email + password sign-in (server/src/routes/auth.ts). The preview keeps no
+  // credential store, so any password of the right length passes; the display
+  // name is derived from the address so a review sign-in is stable across reloads.
   if (method === 'POST' && path === '/api/auth/session') {
-    return { token: 'demo-token', userId: 'u1', displayName: body?.displayName || 'Ada Lovelace' };
+    const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
+    if (!email.includes('@') || password.length < 8) {
+      return {
+        __status: 400,
+        code: 'invalid_request',
+        message: 'email and a password of at least 8 characters are required',
+      };
+    }
+    const localPart = email.split('@')[0].replace(/[._-]+/g, ' ');
+    const displayName =
+      body?.displayName ?? (localPart.charAt(0).toUpperCase() + localPart.slice(1) || 'Ada');
+    return { token: 'demo-token', userId: 'u1', displayName };
   }
+
+  if (method === 'POST' && path === '/api/auth/logout') return { __status: 204 };
 
   // PayPal identity (DEV_PLAN §2.17). The real API 302s to PayPal and the
   // callback 302s back with a one-time code; the preview skips the consent page

@@ -14,12 +14,14 @@ import { config } from './config.js';
 import { feeCoverAllowed, feeScheduleFor, grossUpMinor } from './fees.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
+import { allocate } from './money.js';
 import { createOrder, isPayPalConfigured, paypalMeUrl } from './paypal.js';
 import { cleanupWorkDir, extractReceipt, type MediaInput } from './receipt.js';
 import type {
     AllocationRow,
     BillItemRow,
     BillRow,
+    BillSplitEntryRow,
     ShareRow,
 } from './serialize.js';
 import { awardFrontedGlobie } from './settlement.js';
@@ -46,7 +48,11 @@ export function mediaPath(storageKey: string): string {
 
 export async function loadBill(
   billId: string,
-): Promise<{ bill: BillRow; items: BillItemRow[] }> {
+): Promise<{
+  bill: BillRow;
+  items: BillItemRow[];
+  splitEntries: BillSplitEntryRow[];
+}> {
   const { rows } = await query<BillRow>(`select b.* from bills b where b.id = $1`, [
     billId,
   ]);
@@ -60,7 +66,14 @@ export async function loadBill(
       order by created_at asc`,
     [billId],
   );
-  return { bill, items: items.rows };
+  const splitEntries = await query<BillSplitEntryRow>(
+    `select bill_id, member_id, amount, weight
+       from bill_split_entries
+      where bill_id = $1
+      order by created_at asc`,
+    [billId],
+  );
+  return { bill, items: items.rows, splitEntries: splitEntries.rows };
 }
 
 export async function loadAllocations(billId: string): Promise<AllocationRow[]> {
@@ -143,6 +156,102 @@ export type FinalizeOutcome =
     };
 
 /**
+ * Weights for the non-receipt split modes. `equal` derives them from the active
+ * member list, `custom` uses the amounts the fronter typed and `percent` the
+ * percentages they assigned; all three then run through the same
+ * largest-remainder `allocate` so the shares still add up to the bill total.
+ */
+async function splitTotals(
+  db: Db,
+  input: { billId: string; groupId: string; mode: string; total: number },
+): Promise<
+  | { ok: true; totals: Map<string, number> }
+  | {
+      ok: false;
+      reason: 'no_allocations' | 'totals_mismatch';
+      message: string;
+    }
+> {
+  if (input.mode === 'equal') {
+    const { rows: members } = await db.query<{ id: string }>(
+      `select id from members where group_id = $1 and status <> 'removed'`,
+      [input.groupId],
+    );
+    if (members.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_allocations',
+        message: 'This group has no members yet',
+      };
+    }
+    const parts = allocate(
+      input.total,
+      members.map(() => 1),
+    );
+    return {
+      ok: true,
+      totals: new Map(
+        members.map((member, index) => [member.id, parts[index] ?? 0]),
+      ),
+    };
+  }
+
+  if (input.mode === 'custom') {
+    const { rows } = await db.query<{
+      member_id: string;
+      amount: number | null;
+    }>(`select member_id, amount from bill_split_entries where bill_id = $1`, [
+      input.billId,
+    ]);
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_allocations',
+        message: 'Add each member’s amount first',
+      };
+    }
+    const totals = new Map(rows.map((row) => [row.member_id, row.amount ?? 0]));
+    const sum = [...totals.values()].reduce((acc, value) => acc + value, 0);
+    if (sum !== input.total) {
+      return {
+        ok: false,
+        reason: 'totals_mismatch',
+        message: 'The custom amounts do not add up to the bill total',
+      };
+    }
+    return { ok: true, totals };
+  }
+
+  const { rows } = await db.query<{
+    member_id: string;
+    weight: number | string | null;
+  }>(`select member_id, weight from bill_split_entries where bill_id = $1`, [
+    input.billId,
+  ]);
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_allocations',
+      message: 'Add each member’s percentage first',
+    };
+  }
+  const weights = rows.map((row) => Number(row.weight ?? 0));
+  const weightSum = weights.reduce((acc, value) => acc + value, 0);
+  if (Math.abs(weightSum - 100) > 0.01) {
+    return {
+      ok: false,
+      reason: 'totals_mismatch',
+      message: 'The percentages must add up to 100',
+    };
+  }
+  const parts = allocate(input.total, weights);
+  return {
+    ok: true,
+    totals: new Map(rows.map((row, index) => [row.member_id, parts[index] ?? 0])),
+  };
+}
+
+/**
  * Turn confirmed lines into one share per member. Runs inside the caller's
  * transaction so the last confirmation and the shares it creates commit
  * together — a member who confirmed every line must never be left staring at
@@ -161,8 +270,9 @@ export async function finalizeBill(
     group_id: string;
     fronted_by: string | null;
     deadline: Date | null;
+    split_mode: string;
   }>(
-    `select b.total, b.currency, b.status, b.agreement_id,
+    `select b.total, b.currency, b.status, b.agreement_id, b.split_mode,
             a.group_id, a.fronted_by, a.deadline
        from bills b
        join agreements a on a.id = b.agreement_id
@@ -175,57 +285,70 @@ export async function finalizeBill(
     return { ok: false, reason: 'bill_closed', message: 'This bill is closed' };
   }
 
-  const { rows: allocations } = await db.query<{
-    member_id: string;
-    amount: number;
-    status: string;
-  }>(
-    `select al.member_id, al.amount, al.status
-       from allocations al
-       join bill_items bi on bi.id = al.bill_item_id
-      where bi.bill_id = $1`,
-    [input.billId],
-  );
-
-  if (allocations.length === 0) {
-    return {
-      ok: false,
-      reason: 'no_allocations',
-      message: 'Assign the items before finalizing',
-    };
-  }
-
-  const pending = allocations.filter((row) => row.status === 'proposed').length;
-  if (pending > 0) {
-    return {
-      ok: false,
-      reason: 'confirmations_pending',
-      message: `${pending} line(s) still need a member's confirmation`,
-    };
-  }
-
-  const totals = new Map<string, number>();
-  for (const row of allocations) {
-    totals.set(row.member_id, (totals.get(row.member_id) ?? 0) + row.amount);
-  }
-
-  const covered = [...totals.values()].reduce((sum, value) => sum + value, 0);
-  const gap = bill.total - covered;
-  if (gap < 0) {
-    return {
-      ok: false,
-      reason: 'totals_mismatch',
-      message: 'Allocated amounts exceed the bill total',
-    };
-  }
-
-  // The fronter already handed the merchant the money for their own food, so
+  // The fronter already handed the merchant the money for their own share, so
   // that share is spent, not owed. Asking them to reimburse themselves would
   // need a self-addressed PayPal order and would keep the bill open forever.
   const fronterId = bill.fronted_by ?? input.fallbackFronterId;
-  if (gap > 0) {
+  const mode = bill.split_mode ?? 'item';
+
+  let totals: Map<string, number>;
+
+  if (mode === 'item') {
+    const { rows: allocations } = await db.query<{
+      member_id: string;
+      amount: number;
+      status: string;
+    }>(
+      `select al.member_id, al.amount, al.status
+         from allocations al
+         join bill_items bi on bi.id = al.bill_item_id
+        where bi.bill_id = $1`,
+      [input.billId],
+    );
+
+    if (allocations.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_allocations',
+        message: 'Assign the items before finalizing',
+      };
+    }
+
+    const pending = allocations.filter((row) => row.status === 'proposed').length;
+    if (pending > 0) {
+      return {
+        ok: false,
+        reason: 'confirmations_pending',
+        message: `${pending} line(s) still need a member's confirmation`,
+      };
+    }
+
+    totals = new Map<string, number>();
+    for (const row of allocations) {
+      totals.set(row.member_id, (totals.get(row.member_id) ?? 0) + row.amount);
+    }
+
+    const covered = [...totals.values()].reduce((sum, value) => sum + value, 0);
+    const gap = bill.total - covered;
+    if (gap < 0) {
+      return {
+        ok: false,
+        reason: 'totals_mismatch',
+        message: 'Allocated amounts exceed the bill total',
+      };
+    }
+
     // Rounding, tax, tip and unassigned lines are carried by the fronter.
-    totals.set(fronterId, (totals.get(fronterId) ?? 0) + gap);
+    if (gap > 0) totals.set(fronterId, (totals.get(fronterId) ?? 0) + gap);
+  } else {
+    const split = await splitTotals(db, {
+      billId: input.billId,
+      groupId: bill.group_id,
+      mode,
+      total: bill.total,
+    });
+    if (!split.ok) return split;
+    totals = split.totals;
   }
 
   const rows = [...totals.entries()].filter(([, amount]) => amount > 0);
@@ -432,7 +555,7 @@ export async function startBillParse(input: {
   currency: string;
   log: FastifyBaseLogger;
   wait?: boolean;
-}): Promise<{ status: 'PARSING'; mediaId: string }> {
+}): Promise<{ status: string; mediaId: string | null }> {
   const { rows } = await query<MediaRow>(
     `select id, kind, storage_key, mime_type
        from bill_media
@@ -443,7 +566,20 @@ export async function startBillParse(input: {
   );
   const media = rows[0];
   if (!media) {
-    throw ApiError.conflict('media_missing', 'Upload a receipt photo or video first');
+    // A bill can be typed in by hand. Once it has lines there is nothing to
+    // extract, so parsing is a no-op instead of an error.
+    const { rows: existing } = await query<{ status: string }>(
+      `select status from bills where id = $1`,
+      [input.billId],
+    );
+    const status = existing[0]?.status ?? 'UPLOADED';
+    if (status === 'UPLOADED' || status === 'PARSING') {
+      throw ApiError.conflict(
+        'media_missing',
+        'Add a photo, a video, or the lines by hand',
+      );
+    }
+    return { status, mediaId: null };
   }
 
   await query(

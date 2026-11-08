@@ -9,6 +9,8 @@ import type {
     Agreement,
     Allocation,
     Bill,
+    BillKind,
+    BillSplitMode,
     Group,
     LeaderboardRow,
     Member,
@@ -325,8 +327,13 @@ export function useAcceptAgreement(groupId: string) {
 export function useCreateBill(groupId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { agreementId: string; currency: string }) =>
-      request<{ bill: Bill }>('/bills', { body: input }),
+    mutationFn: (input: {
+      agreementId: string;
+      currency: string;
+      title?: string | null;
+      kind?: BillKind;
+      splitMode?: BillSplitMode;
+    }) => request<{ bill: Bill }>('/bills', { body: input }),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.group(groupId) }),
   });
 }
@@ -387,16 +394,92 @@ export function useSetAllocations() {
     mutationFn: ({
       billId,
       allocations,
+      splitEntries,
+      splitMode,
+      title,
+      kind,
     }: {
       billId: string;
-      allocations: { billItemId: string; memberId: string; qty: number }[];
+      /** `item` mode: who shares which line, and how much of it. */
+      allocations?: { billItemId: string; memberId: string; qty: number }[];
+      /** `equal` / `custom` / `percent` mode: one entry per member. */
+      splitEntries?: { memberId: string; amountMinor?: number; weight?: number }[];
+      splitMode?: BillSplitMode;
+      title?: string | null;
+      kind?: BillKind;
     }) =>
-      request<{ allocations: Allocation[] }>(`/bills/${billId}/allocations`, {
-        method: 'PATCH',
-        body: { allocations },
-      }),
+      request<{ allocations?: Allocation[]; bill?: Bill }>(
+        `/bills/${billId}/allocations`,
+        {
+          method: 'PATCH',
+          body: { allocations, splitEntries, splitMode, title, kind },
+        },
+      ),
     onSuccess: (_data, vars) =>
       client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) }),
+  });
+}
+
+/** Add a line by hand, for bills that arrive as a number rather than a photo. */
+export function useAddBillItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      billId,
+      name,
+      qty,
+      unitPriceMinor,
+    }: {
+      billId: string;
+      name: string;
+      qty: number;
+      unitPriceMinor: number;
+    }) =>
+      request<{ bill: Bill }>(`/bills/${billId}/items`, {
+        body: { name, qty, unitPriceMinor },
+      }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
+    },
+  });
+}
+
+export function useUpdateBillItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      billId,
+      itemId,
+      name,
+      qty,
+      unitPriceMinor,
+    }: {
+      billId: string;
+      itemId: string;
+      name: string;
+      qty: number;
+      unitPriceMinor: number;
+    }) =>
+      request<{ bill: Bill }>(`/bills/${billId}/items/${itemId}`, {
+        method: 'PATCH',
+        body: { name, qty, unitPriceMinor },
+      }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
+    },
+  });
+}
+
+export function useDeleteBillItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ billId, itemId }: { billId: string; itemId: string }) =>
+      request<{ bill: Bill }>(`/bills/${billId}/items/${itemId}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
+    },
   });
 }
 
@@ -412,6 +495,24 @@ export function useConfirmAllocation() {
       // The last confirmation locks the split on the server, so the payer's
       // own share is new too — refresh the lists that would otherwise sit on
       // an empty "Nothing owed either way".
+      client.invalidateQueries({ queryKey: queryKeys.myShares });
+      client.invalidateQueries({ queryKey: queryKeys.myGroups });
+      client.invalidateQueries({ queryKey: queryKeys.myActivity });
+    },
+  });
+}
+
+/**
+ * Turn the saved split into shares. Item mode does this on the last confirm;
+ * even/custom/percent have nothing to confirm, so the fronter locks it here.
+ */
+export function useFinalizeBill() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ billId }: { billId: string }) =>
+      request<{ bill: Bill; shares: Share[] }>(`/bills/${billId}/finalize`, { body: {} }),
+    onSuccess: (_data, vars) => {
+      client.invalidateQueries({ queryKey: queryKeys.bill(vars.billId) });
       client.invalidateQueries({ queryKey: queryKeys.myShares });
       client.invalidateQueries({ queryKey: queryKeys.myGroups });
       client.invalidateQueries({ queryKey: queryKeys.myActivity });

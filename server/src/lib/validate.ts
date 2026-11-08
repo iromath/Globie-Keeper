@@ -11,6 +11,88 @@ const PAYPAL_ME_HANDLE = /^[A-Za-z0-9._-]{3,40}$/;
 /** How a fronter gets reimbursed. Chosen per member, snapshotted per share. */
 export type PaymentMode = 'payee_direct' | 'paypal_me';
 
+/** Any shared cost, not just a restaurant receipt. */
+export type BillKind =
+  | 'meal'
+  | 'groceries'
+  | 'rent'
+  | 'utilities'
+  | 'travel'
+  | 'gift'
+  | 'subscription'
+  | 'other';
+
+/** How the bill total becomes shares. */
+export type BillSplitMode = 'item' | 'equal' | 'custom' | 'percent';
+
+const BILL_KINDS: readonly BillKind[] = [
+  'meal',
+  'groceries',
+  'rent',
+  'utilities',
+  'travel',
+  'gift',
+  'subscription',
+  'other',
+];
+
+const BILL_SPLIT_MODES: readonly BillSplitMode[] = [
+  'item',
+  'equal',
+  'custom',
+  'percent',
+];
+
+export function optionalBillKind(
+  source: Record<string, unknown>,
+  key = 'kind',
+): BillKind | null {
+  const value = source[key];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || !BILL_KINDS.includes(value as BillKind)) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be one of ${BILL_KINDS.join(', ')}`,
+    );
+  }
+  return value as BillKind;
+}
+
+export function optionalSplitMode(
+  source: Record<string, unknown>,
+  key = 'splitMode',
+): BillSplitMode | null {
+  const value = source[key];
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value !== 'string' ||
+    !BILL_SPLIT_MODES.includes(value as BillSplitMode)
+  ) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be one of ${BILL_SPLIT_MODES.join(', ')}`,
+    );
+  }
+  return value as BillSplitMode;
+}
+
+/** A percentage weight: 0 to 100, up to two decimal places. */
+export function requiredWeight(
+  source: Record<string, unknown>,
+  key = 'weight',
+): number {
+  const value = source[key];
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 100
+  ) {
+    throw ApiError.badRequest(`invalid_${key}`, `${key} must be between 0 and 100`);
+  }
+  return Math.round(value * 10000) / 10000;
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw ApiError.badRequest('invalid_body', 'Expected a JSON object body');

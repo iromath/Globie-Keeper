@@ -35,7 +35,7 @@ export default function JoinScreen() {
     <Screen
       header={{
         title: 'Join a group',
-        subtitle: 'One code is all it takes to sit at the table.',
+        subtitle: 'One code is all it takes to join the group.',
         back: true,
       }}
     >

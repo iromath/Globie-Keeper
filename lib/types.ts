@@ -47,10 +47,31 @@ export type BillItem = {
   confidence: number;
 };
 
+export type BillKind =
+  | 'meal'
+  | 'groceries'
+  | 'rent'
+  | 'utilities'
+  | 'travel'
+  | 'gift'
+  | 'subscription'
+  | 'other';
+
+export type BillSplitMode = 'item' | 'equal' | 'custom' | 'percent';
+
+export type BillSplitEntry = {
+  memberId: string;
+  amountMinor: number | null;
+  weight: number | null;
+};
+
 export type Bill = {
   id: string;
   agreementId: string;
   merchant: string | null;
+  title: string | null;
+  kind: BillKind;
+  splitMode: BillSplitMode;
   currency: Currency;
   subtotalMinor: number;
   taxMinor: number;
@@ -60,6 +81,7 @@ export type Bill = {
   totalMinor: number;
   status: string;
   items: BillItem[];
+  splitEntries: BillSplitEntry[];
   framesExtracted: number;
   warnings: string[];
 };

@@ -5,19 +5,57 @@ import { config } from '../lib/config.js';
 import { ApiError } from '../lib/http-error.js';
 import { createOpaqueCode, createSessionToken, hashToken } from '../lib/ids.js';
 import {
-  buildLoginAuthorizeUrl,
-  exchangeAuthorizationCode,
-  fetchUserInfo,
-  isPayPalConfigured,
-  type PayPalIdentity,
+    hashPassword,
+    isAcceptablePassword,
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
+    verifyPassword,
+} from '../lib/password.js';
+import {
+    buildLoginAuthorizeUrl,
+    exchangeAuthorizationCode,
+    fetchUserInfo,
+    isPayPalConfigured,
+    type PayPalIdentity,
 } from '../lib/paypal.js';
-import { asRecord, requiredString } from '../lib/validate.js';
+import { consume, forget } from '../lib/throttle.js';
+import { asRecord, optionalString, requiredString } from '../lib/validate.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-type UserRow = { id: string; email: string; display_name: string };
+type UserRow = {
+  id: string;
+  email: string;
+  display_name: string;
+  password_hash: string | null;
+  paypal_payer_id: string | null;
+};
 
 type SessionResponse = { token: string; userId: string; displayName: string };
+
+/** One message for "no such email" and "wrong password" — never confirm which. */
+function invalidCredentials(): ApiError {
+  return new ApiError(
+    401,
+    'invalid_credentials',
+    'That email and password do not match.',
+  );
+}
+
+/**
+ * Read the password without trimming it: spaces are part of the secret, so
+ * `requiredString` (which trims) is the wrong tool here.
+ */
+function readPassword(body: Record<string, unknown>): string {
+  const value = body.password;
+  if (typeof value !== 'string' || !isAcceptablePassword(value)) {
+    throw ApiError.badRequest(
+      'invalid_password',
+      `password must be ${PASSWORD_MIN_LENGTH}-${PASSWORD_MAX_LENGTH} characters`,
+    );
+  }
+  return value;
+}
 
 /** Bearer token + 60-day row, identical for email and PayPal sign-in. */
 async function issueSession(userId: string): Promise<string> {
@@ -27,6 +65,8 @@ async function issueSession(userId: string): Promise<string> {
      values ($1, $2, now() + ($3 || ' days')::interval)`,
     [hashToken(token), userId, String(config.sessionTtlDays)],
   );
+  // Rows are only read while unexpired; retiring them keeps the table bounded.
+  await query(`delete from sessions where expires_at < now()`);
   return token;
 }
 
@@ -108,41 +148,107 @@ async function linkPayPalAccount(
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   /**
-   * Passwordless sign-in: create the account on first use, rotate a bearer
-   * token on every call. A PayPal-linked row refuses this path, otherwise a
-   * typed address would inherit a verified account (§2.17 rule 3).
+   * Email + password sign-in (DEV_PLAN §2.17).
+   *
+   * The address alone no longer mints a session: an existing row has to
+   * present the password it was created with. A row created before passwords
+   * existed (no hash, no PayPal link) claims one on its first sign-in and
+   * never accepts an email-only request again.
+   *
+   * A create-account request is the same call carrying `displayName`. Without
+   * it, an unknown address is just a failed sign-in, so the endpoint cannot be
+   * turned into an account factory by guessing addresses.
    */
   app.post('/auth/session', async (request): Promise<SessionResponse> => {
     const body = asRecord(request.body);
     const email = requiredString(body, 'email', { min: 3, max: 320 }).toLowerCase();
-    const displayName = requiredString(body, 'displayName', { min: 1, max: 80 });
+    const password = readPassword(body);
+    const displayName = optionalString(body, 'displayName', 80);
 
     if (!EMAIL.test(email)) {
       throw ApiError.badRequest('invalid_email', 'email is not a valid address');
     }
 
-    const { rows } = await query<UserRow>(
-      `insert into users (email, display_name)
-       values ($1, $2)
-       on conflict (lower(email)) do update set display_name = excluded.display_name
-       where users.paypal_payer_id is null
-       returning id, email, display_name`,
-      [email, displayName],
-    );
-
-    const user = rows[0];
-    if (!user) {
-      throw ApiError.conflict(
-        'use_paypal_login',
-        'This account signs in with PayPal',
-      );
+    // Per-IP first: credential stuffing rotates emails, so the address bucket
+    // alone would never trip. Five times the per-email ceiling leaves room for
+    // a shared office NAT.
+    const window = config.authAttemptWindowMs;
+    const throttleMessage = 'Too many sign-in attempts. Wait a few minutes and try again.';
+    if (!consume(`auth:ip:${request.ip}`, config.authAttemptLimit * 5, window)) {
+      throw ApiError.tooManyRequests(throttleMessage);
+    }
+    const emailKey = `auth:email:${email}`;
+    if (!consume(emailKey, config.authAttemptLimit, window)) {
+      throw ApiError.tooManyRequests(throttleMessage);
     }
 
+    const { rows } = await query<UserRow>(
+      `select id, email, display_name, password_hash, paypal_payer_id
+         from users
+        where lower(email) = $1`,
+      [email],
+    );
+    const user = rows[0];
+
+    if (user) {
+      if (user.password_hash) {
+        if (!(await verifyPassword(password, user.password_hash))) {
+          throw invalidCredentials();
+        }
+        forget(emailKey);
+        return {
+          token: await issueSession(user.id),
+          userId: user.id,
+          displayName: user.display_name,
+        };
+      }
+
+      // No password means no email credential. PayPal-linked rows sign in with
+      // PayPal; every other such row was retired by 016 and its address freed.
+      if (user.paypal_payer_id) {
+        throw ApiError.conflict(
+          'use_paypal_login',
+          'This account signs in with PayPal',
+        );
+      }
+
+      throw invalidCredentials();
+    }
+
+    if (!displayName) throw invalidCredentials();
+
+    const { rows: created } = await query<{ id: string; display_name: string }>(
+      `insert into users (email, display_name, password_hash, password_updated_at)
+       values ($1, $2, $3, now())
+       on conflict (lower(email)) do nothing
+       returning id, display_name`,
+      [email, displayName, await hashPassword(password)],
+    );
+    const fresh = created[0];
+    // Lost a race with a simultaneous sign-up: the next attempt signs in.
+    if (!fresh) throw invalidCredentials();
+
+    forget(emailKey);
     return {
-      token: await issueSession(user.id),
-      userId: user.id,
-      displayName: user.display_name,
+      token: await issueSession(fresh.id),
+      userId: fresh.id,
+      displayName: fresh.display_name,
     };
+  });
+
+  /**
+   * Revoke the bearer token server-side. Without this a token stayed valid for
+   * its full 60 days after the client forgot it.
+   */
+  app.post('/auth/logout', async (request, reply) => {
+    const header = request.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ')
+      ? header.slice('Bearer '.length).trim()
+      : '';
+    if (token) {
+      await query(`delete from sessions where token_hash = $1`, [hashToken(token)]);
+    }
+    return reply.code(204).send();
   });
 
   /**

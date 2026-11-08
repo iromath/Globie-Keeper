@@ -63,7 +63,7 @@ export default function LeaderboardScreen() {
         <EmptyState
           icon={icon.heroOutline}
           title="Nobody has fronted yet"
-          body="The board fills in once a bill is settled. Pay for the next meal and you take the top seat."
+          body="The board fills in once a bill is settled. Pay for the next bill and you take the top seat."
         />
       ) : (
         <View style={styles.list}>
