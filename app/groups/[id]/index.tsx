@@ -315,6 +315,12 @@ export default function GroupScreen() {
         currency={currency}
         members={members}
         isFronter={isFronter}
+        onPayMyShare={() => router.push('/me/shares')}
+        onOpenBill={() =>
+          bill
+            ? router.push({ pathname: '/groups/[id]/bill', params: { id, billId: bill.id } })
+            : router.push({ pathname: '/groups/[id]/bill', params: { id } })
+        }
       />
 
       <View style={styles.linkRow}>

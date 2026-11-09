@@ -10,8 +10,8 @@ import { BabyKaeNa } from '@/components/ui/mascot';
 import { Text } from '@/components/ui/text';
 import { colors, radius, space } from '@/components/ui/theme';
 import { stagger } from '@/components/ui/transitions';
-import { formatMinor } from '@/lib/money';
 import { ApiError } from '@/lib/api';
+import { formatMinor } from '@/lib/money';
 import { useAgentChat, useAgentMessage } from '@/lib/queries';
 import type {
     AgentResponse,
@@ -30,9 +30,14 @@ type Props = {
   members: Member[];
   /** Only the member who paid the merchant may steer the bill. */
   isFronter: boolean;
+  /** Member-side shortcuts. Navigation lives in the screen, not in the chat. */
+  onPayMyShare?: () => void;
+  onOpenBill?: () => void;
 };
 
 type Message = { id: string; from: 'you' | 'globie'; text: string };
+
+type QuickAction = { label: string; go?: () => void };
 
 type Pending = { tool: AgentToolName; args: Record<string, unknown>; token: string };
 
@@ -70,8 +75,10 @@ const toolCopy: Record<AgentToolName, string> = {
 };
 
 /** Shown when only the deterministic tools are available (no chat model). */
-const CAPABILITIES =
+const FRONTER_CAPABILITIES =
   'I can read the receipt, split the bill, ask for confirmations, tell you who still owes, nudge someone, request payment, or award Globie points.';
+const MEMBER_CAPABILITIES =
+  'I can tell you who still owes on this bill. To pay your own share, use Pay my share — or open the bill to see the split.';
 
 /**
  * The conversational surface over `POST /api/agent/message` (DEV_PLAN §2.11).
@@ -91,6 +98,8 @@ export function GlobieChat({
   currency,
   members,
   isFronter,
+  onPayMyShare,
+  onOpenBill,
 }: Props) {
   const agent = useAgentMessage();
   const chat = useAgentChat();
@@ -102,7 +111,7 @@ export function GlobieChat({
       from: 'globie',
       text: isFronter
         ? 'I can read the receipt, split it, ask everyone to confirm, chase a late payer, or request reimbursement. Tell me what you need.'
-        : 'The fronter holds this bill. I can tell you who still owes — pay your share from the My shares tab.',
+        : 'The fronter holds this bill. I can tell you who still owes — then pay your share or open the bill to see the split.',
     },
   ]);
   const [draft, setDraft] = useState('');
@@ -113,16 +122,25 @@ export function GlobieChat({
   const collected = billStatus === 'FINALIZED' || billStatus === 'COLLECTING';
   const splittable = Boolean(billId) && SPLITTABLE.has(billStatus ?? '');
 
-  const quick: string[] = [];
-  if (isFronter && splittable) {
-    quick.push('Split the bill', 'Ask everyone to confirm');
-  }
-  if (collected) {
-    quick.push('Who still owes?');
-  }
-  if (isFronter && collected) {
-    quick.push('Nudge the late payer');
-    if (agreementId) quick.push('Ask everyone to pay');
+  // Two audiences, two menus. Steering the bill — splitting it, confirming
+  // lines, chasing people, requesting money — belongs to the member who paid
+  // the merchant (DEV_PLAN §2.8, §11.3). Everyone else reads the status and
+  // settles their own share, so they only get those three shortcuts.
+  const quick: QuickAction[] = [];
+  if (isFronter) {
+    if (splittable) {
+      quick.push({ label: 'Split the bill' }, { label: 'Ask everyone to confirm' });
+    }
+    if (collected) {
+      quick.push({ label: 'Who still owes?' }, { label: 'Nudge the late payer' });
+      if (agreementId) quick.push({ label: 'Ask everyone to pay' });
+    }
+  } else if (billId) {
+    quick.push(
+      { label: 'Who still owes?' },
+      { label: 'Pay my share', go: onPayMyShare },
+      { label: 'Open the bill', go: onOpenBill }
+    );
   }
 
   function say(from: Message['from'], text: string) {
@@ -154,7 +172,7 @@ export function GlobieChat({
       // No chat model configured: fall back to the deterministic menu rather
       // than surfacing a configuration error to the member.
       if (cause instanceof ApiError && cause.code === 'assistant_not_configured') {
-        say('globie', CAPABILITIES);
+        say('globie', isFronter ? FRONTER_CAPABILITIES : MEMBER_CAPABILITIES);
         return;
       }
       throw cause;
@@ -266,7 +284,7 @@ export function GlobieChat({
     if (intent.kind !== 'status' && intent.kind !== 'unknown' && !isFronter) {
       say(
         'globie',
-        'Only the fronter can steer this bill — they are the one who paid the merchant. I can still tell you who owes, and you can pay your share from the My shares tab.'
+        'Only the fronter can steer this bill — they are the one who paid the merchant. I can still tell you who owes, and you can settle your own share with Pay my share.'
       );
       return;
     }
@@ -420,14 +438,14 @@ export function GlobieChat({
 
       {quick.length > 0 && !pending && !choice ? (
         <View style={styles.choices}>
-          {quick.map((label) => (
+          {quick.map((action) => (
             <Button
-              key={label}
+              key={action.label}
               compact
               variant="secondary"
-              title={label}
+              title={action.label}
               disabled={busy}
-              onPress={() => void submit(label)}
+              onPress={() => (action.go ? action.go() : void submit(action.label))}
             />
           ))}
         </View>
