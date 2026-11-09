@@ -8,6 +8,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { HelpManual } from '@/components/help/manual';
 import { SignIn } from '@/components/sign-in';
 import { MascotToastProvider } from '@/components/ui/mascot-toast';
 import { Screen } from '@/components/ui/screen';
@@ -143,6 +144,9 @@ function Gate() {
         </Stack>
       );
     }
+    // A shared /help link should explain the app, not demand a sign-in first:
+    // the manual is public and renders without a navigator (§2.22).
+    if (pathname.endsWith('/help')) return <HelpManual />;
     return <SignIn />;
   }
 
