@@ -143,6 +143,19 @@ export function requiredUuid(
   return value;
 }
 
+/** Absent, empty or null → null; anything else must be a UUID. */
+export function optionalUuid(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !UUID.test(value)) {
+    throw ApiError.badRequest(`invalid_${key}`, `${key} must be a UUID`);
+  }
+  return value;
+}
+
 export function pathUuid(value: unknown, key = 'id'): string {
   if (typeof value !== 'string' || !UUID.test(value)) {
     throw ApiError.badRequest(`invalid_${key}`, `${key} must be a UUID`);

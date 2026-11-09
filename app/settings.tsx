@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -479,6 +480,29 @@ export default function SettingsScreen() {
             {notice}
           </Text>
         ) : null}
+      </Card>
+
+      {/* The manual, one tap from wherever someone got stuck (DEV_PLAN §2.22). */}
+      <Card>
+        <SectionHeading
+          glyph={icon.helpOutline}
+          title="Help & manual"
+          hint="Every screen, in the order you use it — with Globie on hand to answer."
+        />
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="Open the help manual"
+          onPress={() => router.push('/help' as Href)}
+          style={styles.choice}
+        >
+          <View style={styles.copy}>
+            <Text variant="label">Open the manual</Text>
+            <Text variant="caption" tone="dim">
+              Search by what you are trying to do: start a group, pay your share, add a PayPal account.
+            </Text>
+          </View>
+          <Icon name={icon.chevronRight} size={18} color={colors.mutedDim} />
+        </Pressable>
       </Card>
     </Screen>
   );

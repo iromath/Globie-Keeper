@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -83,12 +83,20 @@ export default function ActivityScreen() {
         title: 'Activity',
         subtitle: 'Every move across your groups.',
         action: (
-          <IconButton
-            name={icon.settingsOutline}
-            label="Settings"
-            tone="muted"
-            onPress={() => router.push('/settings')}
-          />
+          <View style={styles.headerActions}>
+            <IconButton
+              name={icon.helpOutline}
+              label="Help & manual"
+              tone="muted"
+              onPress={() => router.push('/help' as Href)}
+            />
+            <IconButton
+              name={icon.settingsOutline}
+              label="Settings"
+              tone="muted"
+              onPress={() => router.push('/settings')}
+            />
+          </View>
         ),
       }}
       bottomInset={space.xl}
@@ -198,4 +206,5 @@ const styles = StyleSheet.create({
   },
   copy: { flex: 1, gap: 2 },
   inline: { alignSelf: 'flex-start' },
+  headerActions: { flexDirection: 'row', gap: space.xs },
 });

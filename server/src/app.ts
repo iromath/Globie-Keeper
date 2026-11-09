@@ -12,6 +12,7 @@ import { donationRoutes } from './routes/donations.js';
 import { fxRoutes } from './routes/fx.js';
 import { groupRoutes } from './routes/groups.js';
 import { healthRoutes } from './routes/health.js';
+import { helpRoutes } from './routes/help.js';
 import { meRoutes } from './routes/me.js';
 import { paypalRoutes } from './routes/paypal.js';
 import { shareRoutes } from './routes/shares.js';
@@ -82,6 +83,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(agreementRoutes, { prefix: '/api' });
   await app.register(billRoutes, { prefix: '/api' });
   await app.register(fxRoutes, { prefix: '/api' });
+  await app.register(helpRoutes, { prefix: '/api' });
   await app.register(meRoutes, { prefix: '/api' });
   await app.register(shareRoutes, { prefix: '/api' });
   await app.register(tipRoutes, { prefix: '/api' });

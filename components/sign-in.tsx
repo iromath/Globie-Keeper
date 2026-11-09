@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { useSession } from '@/lib/session-context';
+import { HelpManual } from './help/manual';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Field } from './ui/field';
@@ -27,6 +28,9 @@ export function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [paypalBusy, setPaypalBusy] = useState(false);
+  // Signed out there is no navigator to push a route into, so the manual
+  // renders in place and its back button returns here (§2.22).
+  const [showHelp, setShowHelp] = useState(false);
 
   const canSubmit =
     email.includes('@') &&
@@ -70,6 +74,8 @@ export function SignIn() {
       setPaypalBusy(false);
     }
   }
+
+  if (showHelp) return <HelpManual onClose={() => setShowHelp(false)} />;
 
   return (
     <Screen style={styles.screen}>
@@ -165,6 +171,14 @@ export function SignIn() {
           disabled={busy || paypalBusy}
         />
       </Card>
+
+      <Button
+        title="Not sure yet? Read the manual"
+        variant="ghost"
+        compact
+        icon={icon.helpOutline}
+        onPress={() => setShowHelp(true)}
+      />
     </Screen>
   );
 }

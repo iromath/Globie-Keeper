@@ -84,6 +84,9 @@ export const icon = {
   sync: 'sync',
   logOut: 'log-out-outline',
   information: 'information-circle-outline',
+  // The manual is one meaning, everywhere it is offered (§2.22).
+  help: 'help-circle',
+  helpOutline: 'help-circle-outline',
 } as const satisfies Record<string, IconName>;
 
 type Props = {

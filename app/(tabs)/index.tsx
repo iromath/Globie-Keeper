@@ -1,4 +1,4 @@
-import { Link, router } from 'expo-router';
+import { Link, router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -141,6 +141,29 @@ export default function HomeScreen() {
             icon={icon.chevronRight}
             iconSide="right"
             onPress={() => router.push('/donate')}
+          />
+        </View>
+      </Card>
+
+      {/* New here, or stuck mid-bill: the manual names every screen (§2.22). */}
+      <Card>
+        <View style={styles.fundRow}>
+          <View style={styles.fundGlyph}>
+            <Icon name={icon.helpOutline} size={20} color={colors.accent} />
+          </View>
+          <View style={styles.fundCopy}>
+            <Text variant="label">Help & manual</Text>
+            <Text variant="caption" tone="muted">
+              Search how to split, pay, tip or donate — or just ask Globie.
+            </Text>
+          </View>
+          <Button
+            compact
+            variant="secondary"
+            title="Open"
+            icon={icon.chevronRight}
+            iconSide="right"
+            onPress={() => router.push('/help' as Href)}
           />
         </View>
       </Card>

@@ -15,6 +15,7 @@ import { requireBillMember, requireMember } from './access.js';
 import { loadBill, loadShares } from './bills.js';
 import { config } from './config.js';
 import { ApiError } from './http-error.js';
+import { manualDigest } from './manual.js';
 import { formatAmount } from './paypal.js';
 import { listTips, loadFronter } from './tips.js';
 
@@ -26,7 +27,7 @@ const TIP_OPEN = new Set(['FINALIZED', 'COLLECTING', 'SETTLED']);
 const MAX_MESSAGE_CHARS = 600;
 const MAX_TURN_CHARS = 1_500;
 
-const SYSTEM_PROMPT = `You are Globie, the in-app assistant for Globie Keeper, an app a group uses to split a restaurant bill and collect reimbursements through PayPal.
+const SYSTEM_PROMPT = `You are Globie, the in-app assistant for Globie Keeper, an app a group uses to split a bill — dinner, a trip, a shared purchase — and collect reimbursements through PayPal.
 
 Voice: warm, brief, plain. At most three sentences. No markdown, no bullet lists.
 
@@ -34,11 +35,13 @@ What the app can do (these are actions you cannot perform yourself):
 - read the receipt, split the bill across the group, ask everyone to confirm their lines
 - say who still owes, nudge a member, request a PayPal payment, award Globie points
 - take a tip for the fronter: the bill screen has a "Tip the fronter" card with preset amounts, paid straight to the fronter through PayPal and worth +2 Globie
+- adopt trees in the Globie Fund with PayPal or with Globie points, where 1,000 points are worth US$1
 Only the fronter — the member who paid the merchant — can change the bill.
 Tipping is one per member, it opens once the bill is finalized, and the fronter cannot tip themselves.
 
 Rules:
-- Answer from CONTEXT only. Never invent names, amounts, statuses or dates. If something is not in CONTEXT, say you do not know.
+- Answer from CONTEXT and MANUAL only. Never invent names, amounts, statuses or dates. If something is in neither, say you do not know.
+- When asked how to do something in the app, answer from MANUAL, naming the exact screen and quoting the button labels it gives. Never describe a control that is not in MANUAL or CONTEXT.
 - You cannot execute actions, move money or send messages, and you must never claim you did. If asked, point to the button or tell the member which sentence to type.
 - Quote amounts exactly as they appear in CONTEXT, with their currency.
 - Reply in the language the member wrote in.`;
@@ -65,9 +68,23 @@ export function parseChatHistory(value: unknown): ChatTurn[] {
 /** A compact, factual brief the model may quote but must not extrapolate. */
 async function buildContext(
   request: FastifyRequest,
-  groupId: string,
+  groupId: string | null,
   billId: string | null,
 ): Promise<string> {
+  // App-wide help (§2.22): no group means no group-scoped facts to read.
+  if (!groupId) {
+    return [
+      'GROUP',
+      'none selected — this question is about the app itself, not one group',
+      '',
+      'BILL',
+      'none selected',
+      '',
+      'TIPS',
+      'none — no bill selected',
+    ].join('\n');
+  }
+
   const member = await requireMember(request, groupId);
 
   const { rows: groupRows } = await query<{ name: string }>(
@@ -192,7 +209,7 @@ async function buildContext(
  */
 export async function chatReply(input: {
   request: FastifyRequest;
-  groupId: string;
+  groupId: string | null;
   billId: string | null;
   message: string;
   history: ChatTurn[];
@@ -206,6 +223,7 @@ export async function chatReply(input: {
   }
 
   const context = await buildContext(input.request, input.groupId, input.billId);
+  const manual = manualDigest(input.message);
 
   let response: Response;
   try {
@@ -220,7 +238,7 @@ export async function chatReply(input: {
         temperature: 0.3,
         max_tokens: 300,
         messages: [
-          { role: 'system', content: `${SYSTEM_PROMPT}\n\nCONTEXT\n${context}` },
+          { role: 'system', content: `${SYSTEM_PROMPT}\n\nMANUAL\n${manual}\n\nCONTEXT\n${context}` },
           ...input.history,
           { role: 'user', content: input.message.slice(0, MAX_MESSAGE_CHARS) },
         ],

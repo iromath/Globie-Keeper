@@ -17,6 +17,7 @@ import type {
     DonationsResponse,
     Group,
     LeaderboardRow,
+    ManualSection,
     Member,
     PaymentMode,
     SettledRate,
@@ -54,6 +55,7 @@ export const queryKeys = {
   myNotifications: ['me', 'notifications'] as const,
   donations: ['donations'] as const,
   donationSpecies: ['donations', 'species'] as const,
+  help: ['help'] as const,
 };
 
 export function useGroup(groupId: string) {
@@ -761,7 +763,8 @@ export function useAgentMessage() {
 
 export type AgentChatInput = {
   message: string;
-  groupId: string;
+  /** Omitted when the question is about the app, not one group (§2.22). */
+  groupId?: string | null;
   billId?: string | null;
   /** Recent turns, oldest first; the server truncates what it replays. */
   history: { role: 'user' | 'assistant'; content: string }[];
@@ -774,10 +777,22 @@ export function useAgentChat() {
       request<AgentChatResponse>('/agent/chat', {
         body: {
           message,
-          group_id: groupId,
+          group_id: groupId ?? null,
           bill_id: billId ?? null,
           history,
         },
       }),
+  });
+}
+
+/**
+ * The user manual (§2.22). Public and stable, so it is cached hard: the Help
+ * page must open instantly and the copy changes with a deploy, not a scroll.
+ */
+export function useHelp() {
+  return useQuery({
+    queryKey: queryKeys.help,
+    queryFn: () => request<{ sections: ManualSection[] }>('/help'),
+    staleTime: 5 * 60 * 1000,
   });
 }

@@ -299,3 +299,16 @@ export type AgentResponse = {
 export type AgentChatResponse = {
   reply: string;
 };
+
+/**
+ * `GET /api/help` (§2.22). A manual section is also what Globie is taught, so
+ * the words on the Help page and in a reply cannot drift apart.
+ */
+export type ManualSection = {
+  id: string;
+  title: string;
+  summary: string;
+  keywords: string[];
+  steps: string[];
+  screen: string | null;
+};
