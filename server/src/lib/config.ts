@@ -143,6 +143,12 @@ export const config = {
   paypalLoginReturnUrl:
     process.env.PAYPAL_LOGIN_RETURN_URL ?? `${publicOrigin}/api/auth/paypal/callback`,
   paypalLoginScopes: process.env.PAYPAL_LOGIN_SCOPES ?? 'openid profile email',
+  /**
+   * Locale of PayPal's own hosted pages (checkout, sign-in, consent). Set to
+   * English so a Thai-locale browser is not served the Thai checkout. BCP 47
+   * form — the legacy `locale.x` query pair is derived from it.
+   */
+  paypalLocale: process.env.PAYPAL_LOCALE ?? 'en-US',
   paypalLoginWebReturnUrl:
     process.env.PAYPAL_LOGIN_WEB_RETURN_URL ?? `${webOrigin}/paypal/login`,
   paypalLoginNativeReturnUrl:

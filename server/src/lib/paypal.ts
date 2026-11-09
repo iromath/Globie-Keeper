@@ -51,6 +51,30 @@ function apiBase(): string {
     : 'https://api-m.sandbox.paypal.com';
 }
 
+/**
+ * PayPal localises the hosted checkout and sign-in pages from the browser's
+ * `Accept-Language` unless the request pins a locale, which is why a Thai
+ * browser got a Thai checkout and Thai consent page. Orders v2 takes BCP 47
+ * (`en-US`); the redirect hosts (checkoutnow, /connect) ignore that and only
+ * honour the legacy `locale.x` / `country.x` pair. Both are derived from the
+ * one `PAYPAL_LOCALE` setting.
+ */
+function paypalLocale(): { bcp47: string; legacy: string; country: string } {
+  const bcp47 = config.paypalLocale;
+  const [language, region] = bcp47.split('-');
+  return {
+    bcp47,
+    legacy: region ? `${language}_${region}` : `${language}_US`,
+    country: region ?? 'US',
+  };
+}
+
+/** Pins a PayPal-hosted redirect page to the configured locale. */
+function withLocale(href: string): string {
+  const separator = href.includes('?') ? '&' : '?';
+  return `${href}${separator}locale.x=${paypalLocale().legacy}`;
+}
+
 export function formatAmount(amountMinor: number, currency: string): string {
   const exponent = currencyExponent(currency);
   return (amountMinor / 10 ** exponent).toFixed(exponent);
@@ -209,6 +233,9 @@ export async function createOrder(input: {
         paypal: {
           experience_context: {
             brand_name: 'Globie Keeper',
+            // Pin the hosted checkout to English; without it PayPal follows the
+            // browser and serves a Thai page to a Thai-locale payer.
+            locale: paypalLocale().bcp47,
             user_action: 'PAY_NOW',
             shipping_preference: 'NO_SHIPPING',
             return_url: returnUrl(config.paypalReturnUrl, input.target),
@@ -237,7 +264,7 @@ export async function createOrder(input: {
     throw new ApiError(502, 'paypal_order_failed', 'PayPal returned no approval link');
   }
 
-  return { id: order.id, approveUrl };
+  return { id: order.id, approveUrl: withLocale(approveUrl) };
 }
 
 /**
@@ -445,6 +472,11 @@ export function buildLoginAuthorizeUrl(state: string): string {
     state,
     // The native auth sheet is a full browser page; the popup layout squashes it.
     fullPage: 'true',
+    // /connect ignores Orders v2's `locale` and localises from the browser
+    // unless given the legacy pair — and `country.x=TH` keeps it Thai even with
+    // `locale.x=en_US`, so the country has to be US to get English.
+    'country.x': paypalLocale().country,
+    'locale.x': paypalLocale().legacy,
   });
 
   return `${host}/connect?${query.toString()}`;
