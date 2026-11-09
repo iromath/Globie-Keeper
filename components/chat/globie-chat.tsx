@@ -498,19 +498,21 @@ function parseIntent(raw: string, members: Member[]): Intent {
   if (/\b(split|divide|who had what)\b/.test(text)) {
     return { kind: 'split' };
   }
+  // "Ask everyone to pay" is a payment request, not a line confirmation, so the
+  // payment branch must be checked before the broader `ask everyone` rule.
+  // "Pay the fronter back" is a member-side reimbursement: the order names the
+  // fronter as payee, so requesting payment is the whole action.
+  if (
+    /\brequest (payment|money)\b|\bsend .*\b(payment|paypal|request|invoice)\b|\binvoice\b/.test(text) ||
+    /\bpay\b[^.!?]{0,24}\bback\b|\breimburse\b|\bask (everyone|them|the group) (to )?pay\b/.test(text)
+  ) {
+    return { kind: 'payment_request', memberHint: findMember(text, members) };
+  }
   if (/\bconfirm\b.*\b(lines?|items?|orders?|shares?)\b|\bask (everyone|them|the group)\b/.test(text)) {
     return { kind: 'confirm_lines' };
   }
   if (/\b(nudge|remind(er)?|chase|poke|hurry|late|overdue)\b/.test(text)) {
     return { kind: 'remind', tone: toneOf(text), memberHint: findMember(text, members) };
-  }
-  // "Pay the fronter back" is a member-side reimbursement: the order names the
-  // fronter as payee, so requesting payment is the whole action.
-  if (
-    /\brequest (payment|money)\b|\bsend .*\b(payment|paypal|request|invoice)\b|\binvoice\b/.test(text) ||
-    /\bpay\b[^.!?]{0,24}\bback\b|\breimburse\b/.test(text)
-  ) {
-    return { kind: 'payment_request', memberHint: findMember(text, members) };
   }
   // "Globie" is the assistant's own name, so it cannot be a keyword here: a
   // plain "hi globie" must reach the conversation, not award_points.

@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { GlobieChat } from '@/components/chat/globie-chat';
 import { Timeline } from '@/components/chat/timeline';
@@ -19,10 +19,10 @@ import { colors, radius, space } from '@/components/ui/theme';
 import { formatMinor, toMinor } from '@/lib/money';
 import { useMoney } from '@/lib/money-context';
 import {
-    useAcceptAgreement,
-    useCreateAgreement,
-    useGroup,
-    useGroupTimeline,
+  useAcceptAgreement,
+  useCreateAgreement,
+  useGroup,
+  useGroupTimeline,
 } from '@/lib/queries';
 import type { Agreement } from '@/lib/types';
 
@@ -45,6 +45,8 @@ export default function GroupScreen() {
 
   const [estimate, setEstimate] = useState('');
   const [deadlineDays, setDeadlineDays] = useState('3');
+  // Who actually paid the merchant. Creating the agreement does not answer it.
+  const [frontedBy, setFrontedBy] = useState<string | null>(null);
 
   if (group.isLoading) {
     return (
@@ -86,6 +88,7 @@ export default function GroupScreen() {
     );
   const agreed = agreement?.status === 'accepted';
   const isFronter = Boolean(agreement && agreement.frontedBy === me.id);
+  const fronterName = members.find((member) => member.id === agreement?.frontedBy)?.displayName;
 
   async function onCreateAgreement() {
     const estimatedTotalMinor = toMinor(estimate || '0');
@@ -94,6 +97,7 @@ export default function GroupScreen() {
     await createAgreement.mutateAsync({
       estimatedTotalMinor,
       deadline: new Date(Date.now() + days * 86_400_000).toISOString(),
+      frontedByMemberId: frontedBy ?? me.id,
     });
     setEstimate('');
     notify({
@@ -155,6 +159,34 @@ export default function GroupScreen() {
             title="Set the agreement"
             hint="Everyone taps once. Nobody argues later about who said they were in."
           />
+          <Text variant="label" tone="muted">
+            Who paid the merchant?
+          </Text>
+          <View style={styles.memberChips}>
+            {members.map((member) => {
+              const selected = (frontedBy ?? me.id) === member.id;
+              return (
+                <Pressable
+                  key={member.id}
+                  onPress={() => setFrontedBy(member.id)}
+                  style={[styles.chip, styles.pickerChip, selected && styles.pickerChipActive]}
+                >
+                  <Icon
+                    name={icon.person}
+                    size={12}
+                    color={selected ? colors.accent : colors.mutedDim}
+                  />
+                  <Text variant="caption" tone={selected ? 'accent' : 'muted'}>
+                    {member.displayName}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text variant="caption" tone="muted">
+            Only the person who paid the merchant can steer the bill — the split,
+            the nudges and the payment requests are theirs.
+          </Text>
           <Field
             label={`Estimated total (${currency})`}
             value={estimate}
@@ -205,6 +237,12 @@ export default function GroupScreen() {
               ? `, due ${new Date(agreement.deadline).toLocaleDateString()}`
               : ''}
           </Text>
+          {fronterName ? (
+            <Text variant="caption" tone={isFronter ? 'accent' : 'muted'}>
+              Fronted by {fronterName}
+              {isFronter ? ' (you)' : ''}
+            </Text>
+          ) : null}
           {/* The figure above is only what everyone agreed to before the receipt.
               When the receipt lands higher, say so here, next to that number. */}
           {bill &&
@@ -311,6 +349,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
   },
   chipMe: { backgroundColor: colors.wash },
+  pickerChip: { borderWidth: 1, borderColor: 'transparent' },
+  pickerChipActive: { borderColor: colors.accentText, backgroundColor: colors.wash },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',

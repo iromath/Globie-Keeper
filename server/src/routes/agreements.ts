@@ -9,6 +9,7 @@ import {
     asRecord,
     currencyCode,
     optionalDate,
+    optionalUuid,
     pathUuid,
     requiredMinor,
     requiredUuid,
@@ -45,6 +46,24 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
 
     const member = await requireMember(request, groupId);
 
+    // Creating the agreement is bookkeeping; fronting the bill is a fact about
+    // who paid the merchant. They are not the same person by default — whoever
+    // opens the form must say who the merchant was paid by, or we never learn it.
+    const frontedByMemberId = optionalUuid(body, 'frontedByMemberId') ?? member.id;
+    const { rows: fronterRows } = await query<{ id: string; display_name: string }>(
+      `select m.id, u.display_name
+         from members m join users u on u.id = m.user_id
+        where m.id = $1 and m.group_id = $2 and m.status <> 'removed'`,
+      [frontedByMemberId, groupId],
+    );
+    const fronter = fronterRows[0];
+    if (!fronter) {
+      throw ApiError.badRequest(
+        'invalid_fronted_by_member',
+        'frontedByMemberId must be an active member of this group',
+      );
+    }
+
     const { rows: groupRows } = await query<{ default_currency: string; name: string }>(
       `select default_currency, name from groups where id = $1`,
       [groupId],
@@ -75,7 +94,7 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
         `insert into agreements
            (group_id, currency, estimated_total, deadline, terms_snapshot, status,
             created_by, fronted_by)
-         values ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $6)
+         values ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $7)
          returning id, group_id, currency, estimated_total, deadline, status,
                    created_by, fronted_by`,
         [
@@ -91,6 +110,7 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
             note: 'Each member accepts before the receipt is captured.',
           }),
           member.id,
+          frontedByMemberId,
         ],
       );
       const agreement = rows[0];
@@ -106,7 +126,10 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
         amountMinor: estimatedTotalMinor,
         currency,
         actor: member.displayName,
-        summary: `${member.displayName} opened the agreement — everyone taps once to accept`,
+        summary:
+          frontedByMemberId === member.id
+            ? `${member.displayName} opened the agreement and fronts the bill — everyone taps once to accept`
+            : `${member.displayName} opened the agreement — ${fronter.display_name} fronts the bill`,
       });
 
       const { rows: countRows } = await tx.query<{ total: number }>(

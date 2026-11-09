@@ -26,7 +26,7 @@ export default function LeaderboardScreen() {
       header={{
         title: 'Hero board',
         subtitle:
-          'Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays the biggest Globie award in the group. The line under a name shows how fast they repay others, and that speed earns Globie too.',
+          'Rolling 30 days. The money shows cash fronted — it wins the Hero seat and pays the biggest Globie award in the group. The line under a name says whether they fronted, and how fast they repay others, which earns Globie too.',
         back: true,
         // The trophy is the screen's own mark: it rides beside the title on wide
         // screens and above it on a phone, never floating in the body.
@@ -96,11 +96,16 @@ export default function LeaderboardScreen() {
                   ) : null}
                 </View>
                 <Text variant="caption" tone="muted">
-                  {row.repaymentSpeedHours === null
-                    ? row.frontedMinor > 0
-                      ? 'Fronted the bill'
-                      : 'No repayments yet'
-                    : `Repays others in ~${Math.round(row.repaymentSpeedHours)}h`}
+                  {/* Both facts can be true at once: someone who fronted one bill
+                      can still owe on another. Never hide the fronted line. */}
+                  {[
+                    row.frontedMinor > 0 ? 'Fronted the bill' : null,
+                    row.repaymentSpeedHours !== null
+                      ? `Repays others in ~${Math.round(row.repaymentSpeedHours)}h`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'No repayments yet'}
                 </Text>
               </View>
               <View style={styles.right}>

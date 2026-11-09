@@ -385,7 +385,11 @@ export function useJoinGroup() {
 export function useCreateAgreement(groupId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { estimatedTotalMinor: number; deadline: string | null }) =>
+    mutationFn: (input: {
+      estimatedTotalMinor: number;
+      deadline: string | null;
+      frontedByMemberId: string;
+    }) =>
       request<{ agreement: Agreement }>('/agreements', {
         body: { groupId, ...input },
       }),
