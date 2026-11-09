@@ -211,6 +211,17 @@ export default function DonateScreen() {
                 ? '1 gift'
                 : `${donations.data?.donations.length ?? 0} gifts`}
             </Text>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open globie.earth, the project behind the sanctuary"
+              onPress={() => WebBrowser.openBrowserAsync('https://globie.earth/')}
+              style={({ pressed }) => [styles.earthLink, pressed && styles.pressed]}
+            >
+              <Icon name={icon.globe} size={14} color={colors.accent} />
+              <Text variant="caption" tone="accent">
+                part of the Globie Earth project — globie.earth
+              </Text>
+            </Pressable>
           </View>
           <View style={styles.heroGlyph}>
             <BabyKaeNa size={54} variant="badge" mood="cheer" label={null} />
@@ -616,6 +627,13 @@ const styles = StyleSheet.create({
     height: 58,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  earthLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: space.xs,
+    minHeight: 32,
   },
   section: { gap: space.md },
   speciesRow: { gap: space.sm, paddingRight: space.lg },
