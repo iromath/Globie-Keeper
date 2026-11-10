@@ -15,7 +15,7 @@ import { SectionHeading } from '@/components/ui/section';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import { colors, radius, space } from '@/components/ui/theme';
-import { currencyExponent, formatMinor, sumMinor, toMinor } from '@/lib/money';
+import { currencyExponent, formatMinor, fromMinor, sumMinor, toMinor } from '@/lib/money';
 import { useMoney } from '@/lib/money-context';
 import {
   useAddBillItem,
@@ -31,10 +31,11 @@ import {
   useRequestTip,
   useSetAllocations,
   useTips,
+  useUpdateBillItem,
   useUploadMedia,
   useVoteSplitMode
 } from '@/lib/queries';
-import type { AgreementSplitMode, BillKind, BillSplitMode } from '@/lib/types';
+import type { AgreementSplitMode, BillItem, BillKind, BillSplitMode } from '@/lib/types';
 
 type Assignment = Record<string, string[]>;
 
@@ -179,6 +180,7 @@ export default function BillScreen() {
   const captureTip = useCaptureTip();
   const addItem = useAddBillItem();
   const deleteItem = useDeleteBillItem();
+  const updateItem = useUpdateBillItem();
   const finalizeBill = useFinalizeBill();
   const voteSplit = useVoteSplitMode(id);
 
@@ -193,6 +195,9 @@ export default function BillScreen() {
   const [shares, setShares] = useState<Record<string, string>>({});
   const [qtyEdits, setQtyEdits] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState({ name: '', qty: '1', price: '' });
+  /** The line being corrected in place, and the values typed into it. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [lineDraft, setLineDraft] = useState({ name: '', qty: '1', price: '' });
 
   const bill = billQuery.data?.bill;
   const locked = bill ? collectedStatus.has(bill.status) : false;
@@ -372,6 +377,43 @@ export default function BillScreen() {
       await deleteItem.mutateAsync({ billId: bill.id, itemId });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not remove the line');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** A misread line is fixed in place; the server rebuilds the total from it. */
+  function startEdit(item: BillItem) {
+    const exponent = currencyExponent(currency);
+    setEditingId(item.id);
+    setLineDraft({
+      name: item.name,
+      qty: String(item.qty),
+      price: fromMinor(item.unitPriceMinor, exponent).toFixed(exponent),
+    });
+    setError(null);
+  }
+
+  async function saveLine(itemId: string) {
+    if (!bill) return;
+    const name = lineDraft.name.trim();
+    const qty = Math.max(1, Math.round(Number(lineDraft.qty) || 1));
+    const unitPriceMinor = toMinor(lineDraft.price, currencyExponent(currency));
+    if (!name) {
+      setError('Give the line a name');
+      return;
+    }
+    if (!Number.isFinite(unitPriceMinor) || unitPriceMinor <= 0) {
+      setError('Type a price for the line');
+      return;
+    }
+    setBusy(`edit:${itemId}`);
+    setError(null);
+    try {
+      await updateItem.mutateAsync({ billId: bill.id, itemId, name, qty, unitPriceMinor });
+      setEditingId(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save the line');
     } finally {
       setBusy(null);
     }
@@ -768,6 +810,34 @@ export default function BillScreen() {
                 {warning}
               </Text>
             ))}
+            {isFronter && !locked && bill.status !== 'PARSING' ? (
+              <>
+                <Text variant="caption" tone="muted">
+                  Wrong total or the photo was hard to read? Read the bill again from a
+                  sharper photo. A new read replaces every line and clears the split.
+                </Text>
+                <View style={styles.chips}>
+                  <Button
+                    compact
+                    variant="secondary"
+                    icon={icon.camera}
+                    title="Re-scan"
+                    accessibilityLabel="Re-scan the receipt with the camera"
+                    onPress={() => capture('camera')}
+                    loading={busy === 'capture'}
+                  />
+                  <Button
+                    compact
+                    variant="secondary"
+                    icon={icon.images}
+                    title="Use another photo"
+                    accessibilityLabel="Re-scan the receipt from another photo or video"
+                    onPress={() => capture('library')}
+                    loading={busy === 'capture'}
+                  />
+                </View>
+              </>
+            ) : null}
           </Card>
 
           {bill.status === 'PARSING' ? (
@@ -1017,14 +1087,74 @@ export default function BillScreen() {
                     </View>
                   ) : null}
                   {isFronter && !locked ? (
-                    <Button
-                      compact
-                      variant="ghost"
-                      title="Remove line"
-                      onPress={() => removeItem(item.id)}
-                      loading={busy === `item:${item.id}`}
-                      style={styles.inlineAction}
-                    />
+                    editingId === item.id ? (
+                      <>
+                        <Field
+                          label="Line"
+                          value={lineDraft.name}
+                          onChangeText={(value) =>
+                            setLineDraft((prev) => ({ ...prev, name: value }))
+                          }
+                          maxLength={120}
+                        />
+                        <View style={styles.pair}>
+                          <View style={styles.flex}>
+                            <Field
+                              label="How many"
+                              keyboardType="number-pad"
+                              value={lineDraft.qty}
+                              onChangeText={(value) =>
+                                setLineDraft((prev) => ({ ...prev, qty: value }))
+                              }
+                            />
+                          </View>
+                          <View style={styles.flex}>
+                            <Field
+                              label={`Price each (${currency})`}
+                              keyboardType="decimal-pad"
+                              placeholder="0.00"
+                              value={lineDraft.price}
+                              onChangeText={(value) =>
+                                setLineDraft((prev) => ({ ...prev, price: value }))
+                              }
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.chips}>
+                          <Button
+                            compact
+                            title="Save line"
+                            icon={icon.check}
+                            onPress={() => saveLine(item.id)}
+                            loading={busy === `edit:${item.id}`}
+                          />
+                          <Button
+                            compact
+                            variant="secondary"
+                            title="Cancel"
+                            onPress={() => setEditingId(null)}
+                          />
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.chips}>
+                        <Button
+                          compact
+                          variant="ghost"
+                          title="Edit line"
+                          onPress={() => startEdit(item)}
+                          style={styles.inlineAction}
+                        />
+                        <Button
+                          compact
+                          variant="ghost"
+                          title="Remove line"
+                          onPress={() => removeItem(item.id)}
+                          loading={busy === `item:${item.id}`}
+                          style={styles.inlineAction}
+                        />
+                      </View>
+                    )
                   ) : null}
                 </Card>
               ))}
