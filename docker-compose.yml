@@ -40,8 +40,8 @@ services:
       PAYPAL_ENV: ${PAYPAL_ENV:-sandbox}
       PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
       VISION_API_KEY: ${VISION_API_KEY:-}
-      VISION_API_URL: ${VISION_API_URL:-https://api.deepseek.com/chat/completions}
-      VISION_MODEL: ${VISION_MODEL:-deepseek-flash}
+      VISION_API_URL: ${VISION_API_URL:-}
+      VISION_MODEL: ${VISION_MODEL:-}
       # Notifications: without these the worker can only write in-app nudges.
       NOTIFY_IN_APP: ${NOTIFY_IN_APP:-true}
       NOTIFY_PUSH: ${NOTIFY_PUSH:-false}

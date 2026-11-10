@@ -261,7 +261,7 @@ async function extractFrame(framePath: string, fallbackCurrency: string): Promis
   if (!mime) throw new Error('unsupported image format — use a JPEG, PNG, WebP or GIF photo');
   const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
 
-  // DeepSeek's JSON output mode occasionally returns empty content; one retry
+  // The model's JSON output mode occasionally returns empty content; one retry
   // keeps a legible receipt from being reported as unreadable.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await fetch(config.visionApiUrl, {

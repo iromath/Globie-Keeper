@@ -97,14 +97,13 @@ export const config = {
 
   // --- receipt extraction ---------------------------------------------------
   /**
-   * DeepSeek serves an OpenAI-compatible chat endpoint and `deepseek-flash`
-   * accepts images. Point VISION_API_URL / VISION_MODEL elsewhere to swap
-   * providers; the request shape in lib/receipt.ts stays the same.
+   * Globie AI vision: an OpenAI-compatible chat endpoint with an image-capable
+   * model, named by `VISION_API_URL` and `VISION_MODEL`. Any provider that
+   * speaks the same request shape in lib/receipt.ts can sit behind them.
    */
   visionApiKey: process.env.VISION_API_KEY ?? '',
-  visionApiUrl:
-    process.env.VISION_API_URL ?? 'https://api.deepseek.com/chat/completions',
-  visionModel: process.env.VISION_MODEL ?? 'deepseek-flash',
+  visionApiUrl: process.env.VISION_API_URL ?? '',
+  visionModel: process.env.VISION_MODEL ?? '',
   visionTimeoutMs: int(process.env.VISION_TIMEOUT_MS, 45_000),
   /** Video frames sampled per upload before reconciliation. */
   visionMaxFrames: int(process.env.VISION_MAX_FRAMES, 5),
@@ -112,15 +111,14 @@ export const config = {
   // --- assistant ------------------------------------------------------------
   /**
    * Free-form conversation (lib/assistant.ts). Same OpenAI-compatible endpoint
-   * as the vision model but a text model; falls back to VISION_API_KEY so an
-   * existing deployment only has to name a CHAT_MODEL to turn it on.
+   * as the vision model but a text model; both fall back to the vision
+   * credentials so an existing deployment only has to name a CHAT_MODEL to
+   * turn it on.
    */
   chatApiKey: process.env.CHAT_API_KEY ?? process.env.VISION_API_KEY ?? '',
   chatApiUrl:
-    process.env.CHAT_API_URL ??
-    process.env.VISION_API_URL ??
-    'https://api.deepseek.com/chat/completions',
-  chatModel: process.env.CHAT_MODEL ?? 'deepseek-chat',
+    process.env.CHAT_API_URL ?? process.env.VISION_API_URL ?? '',
+  chatModel: process.env.CHAT_MODEL ?? process.env.VISION_MODEL ?? '',
   chatTimeoutMs: int(process.env.CHAT_TIMEOUT_MS, 20_000),
   /** Previous turns replayed with each request; bounds the prompt size. */
   chatHistoryTurns: int(process.env.CHAT_HISTORY_TURNS, 8),
