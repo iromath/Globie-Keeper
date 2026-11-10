@@ -110,10 +110,23 @@ export const tipRoutes: FastifyPluginAsync = async (app) => {
       throw ApiError.badRequest('invalid_amountMinor', 'A tip must be above zero');
     }
 
-    const { rows: billRows } = await query<{ merchant: string | null }>(
-      `select merchant from bills where id = $1`,
+    const { rows: billRows } = await query<{
+      merchant: string | null;
+      total: number;
+    }>(
+      `select merchant, total from bills where id = $1`,
       [billId],
     );
+
+    // Presets are only suggestions; the amount is free-form now, so the bill
+    // itself is the guard — anything above it is a typo, not a thank-you.
+    const billTotal = billRows[0]?.total ?? 0;
+    if (billTotal > 0 && amountMinor > billTotal) {
+      throw ApiError.badRequest(
+        'invalid_amountMinor',
+        'A tip cannot be larger than the bill',
+      );
+    }
 
     return requestTip({
       billId,

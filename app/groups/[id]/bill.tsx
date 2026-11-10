@@ -50,8 +50,84 @@ const statusCopy: Record<string, string> = {
 };
 const collectedStatus = new Set(['FINALIZED', 'COLLECTING', 'SETTLED']);
 
-/** Thank-you sizes, in major units, so the taps stay one-handed. */
-const TIP_PRESETS = [toMinor(20), toMinor(50), toMinor(100)];
+/**
+ * Thank-you sizes as a share of the bill, not a fixed dollar ladder: on a $96
+ * dinner a $20 opener reads as a second bill rather than a tip. Whole major
+ * units keep the taps clean, and the floor keeps them usable on tiny bills.
+ */
+const TIP_SHARES = [0.02, 0.05, 0.1];
+
+function tipPresets(totalMinor: number, currency: string): number[] {
+  const unit = 10 ** currencyExponent(currency);
+  const rounded = TIP_SHARES.map((share) =>
+    Math.max(unit, Math.round((totalMinor * share) / unit) * unit)
+  );
+  return [...new Set(rounded)];
+}
+
+/**
+ * Preset thank-yous plus a field for anything else. The two states of the tip
+ * card (first try and retry after a declined checkout) share this picker.
+ */
+function TipAmounts({
+  currency,
+  maxMinor,
+  busy,
+  onSend
+}: {
+  currency: string;
+  maxMinor: number;
+  busy: boolean;
+  onSend: (amountMinor: number) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const typed = draft.trim() ? toMinor(draft, currencyExponent(currency)) : NaN;
+  const tooLarge = Number.isFinite(typed) && typed > maxMinor;
+  const canSend = Number.isFinite(typed) && typed > 0 && !tooLarge;
+
+  return (
+    <>
+      <View style={styles.chips}>
+        {tipPresets(maxMinor, currency).map((amountMinor) => (
+          <Button
+            key={amountMinor}
+            compact
+            variant="secondary"
+            icon={icon.hand}
+            title={formatMinor(amountMinor, currency)}
+            accessibilityLabel={`Tip ${formatMinor(amountMinor, currency)}`}
+            onPress={() => onSend(amountMinor)}
+            disabled={busy}
+          />
+        ))}
+      </View>
+      <Field
+        label="Or enter your own amount"
+        keyboardType="decimal-pad"
+        placeholder="0.00"
+        value={draft}
+        onChangeText={setDraft}
+        error={
+          tooLarge
+            ? `A tip can’t be larger than the bill (${formatMinor(maxMinor, currency)}).`
+            : undefined
+        }
+        hint={`Anything up to ${formatMinor(maxMinor, currency)}`}
+      />
+      <Button
+        compact
+        icon={icon.hand}
+        title={canSend ? `Send ${formatMinor(typed, currency)}` : 'Send tip'}
+        loading={busy}
+        disabled={!canSend || busy}
+        onPress={() => {
+          onSend(typed);
+          setDraft('');
+        }}
+      />
+    </>
+  );
+}
 
 const SPLIT_MODES: { id: BillSplitMode; label: string }[] = [
   { id: 'item', label: 'By item' },
@@ -1031,7 +1107,7 @@ export default function BillScreen() {
             </Card>
           ) : null}
 
-          {locked && tips.data ? (
+          {bill && locked && tips.data ? (
             <Card>
               <SectionHeading
                 glyph={icon.hand}
@@ -1042,23 +1118,15 @@ export default function BillScreen() {
                 <>
                   <Text variant="body">
                     The PayPal checkout didn&apos;t go through, so nothing was charged.
-                    Try again with one of these amounts.
+                    Try again with one of these amounts, or name your own.
                   </Text>
                   {tips.data.canTip ? (
-                    <View style={styles.chips}>
-                      {TIP_PRESETS.map((amountMinor) => (
-                        <Button
-                          key={amountMinor}
-                          compact
-                          variant="secondary"
-                          icon={icon.hand}
-                          title={formatMinor(amountMinor, currency)}
-                          accessibilityLabel={`Tip ${formatMinor(amountMinor, currency)}`}
-                          onPress={() => tipFronter(amountMinor)}
-                          disabled={busy === 'tip'}
-                        />
-                      ))}
-                    </View>
+                    <TipAmounts
+                      currency={currency}
+                      maxMinor={bill.totalMinor}
+                      busy={busy === 'tip'}
+                      onSend={tipFronter}
+                    />
                   ) : null}
                 </>
               ) : myTip ? (
@@ -1097,20 +1165,12 @@ export default function BillScreen() {
                     : `${tips.data.frontedByName} needs to add a PayPal email before tips can go through.`}
                 </Text>
               ) : tips.data.canTip ? (
-                <View style={styles.chips}>
-                  {TIP_PRESETS.map((amountMinor) => (
-                    <Button
-                      key={amountMinor}
-                      compact
-                      variant="secondary"
-                      icon={icon.hand}
-                      title={formatMinor(amountMinor, currency)}
-                      accessibilityLabel={`Tip ${formatMinor(amountMinor, currency)}`}
-                      onPress={() => tipFronter(amountMinor)}
-                      disabled={busy === 'tip'}
-                    />
-                  ))}
-                </View>
+                <TipAmounts
+                  currency={currency}
+                  maxMinor={bill.totalMinor}
+                  busy={busy === 'tip'}
+                  onSend={tipFronter}
+                />
               ) : (
                 <Text variant="caption" tone="muted">
                   {tips.data.frontedBy === me?.id

@@ -136,7 +136,7 @@ export const MANUAL: ManualSection[] = [
     keywords: ['tip', 'tipping', 'thanks', 'thank', 'gratuity', 'extra', 'reward the fronter'],
     steps: [
       'Open the bill once it is finalized.',
-      'Use the "Tip the fronter" card and pick a preset amount.',
+      'Use the "Tip the fronter" card and pick a suggested amount, or type your own.',
       'Pay through PayPal. The money goes straight to the fronter — Globie never holds it.',
       'One tip per member, and the fronter cannot tip themselves.',
     ],
