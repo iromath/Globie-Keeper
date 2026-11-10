@@ -54,7 +54,6 @@ example
 
 # local-only docs, not published to GitHub
 /DEV_PLAN.md
-/README.md
 /AGENTS.md
 /SUBMISSION.md
 /DEVPOST_SUBMISSION.md
