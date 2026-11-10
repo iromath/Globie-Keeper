@@ -463,7 +463,10 @@ export function useUploadMedia() {
       file?: Blob | null;
     }) => {
       const form = new FormData();
-      const name = uri.split('/').pop() ?? `receipt.${kind === 'video' ? 'mp4' : 'jpg'}`;
+      // A camera frame is a data URL, so there is no path to take a name from.
+      const tail = uri.startsWith('data:') || uri.startsWith('blob:') ? '' : uri.split('/').pop();
+      const name =
+        tail && tail.length <= 96 ? tail : `receipt.${kind === 'video' ? 'mp4' : 'jpg'}`;
       form.append('kind', kind);
       if (file) {
         form.append('file', file, name);

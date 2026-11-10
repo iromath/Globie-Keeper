@@ -1,7 +1,7 @@
 import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -29,6 +29,17 @@ export default function ScanScreen() {
   // One scan is acted on; the camera keeps emitting until the screen unmounts.
   const settled = useRef(false);
   const missedAt = useRef(0);
+  const asked = useRef(false);
+
+  // The screen exists to scan, so ask the browser straight away. Left to a tap,
+  // the first thing a member saw was a card that reads like a file-upload prompt.
+  useEffect(() => {
+    if (asked.current || permission?.granted || !permission) return;
+    asked.current = true;
+    allowCamera();
+    // `allowCamera` only reports the answer; the ref makes a re-run a no-op.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permission?.granted]);
 
   function accept(payload: string) {
     if (settled.current) return;

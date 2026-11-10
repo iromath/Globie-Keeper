@@ -3,9 +3,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/ui/button';
+import { CameraCapture, type CameraShot } from '@/components/ui/camera-capture';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Field } from '@/components/ui/field';
@@ -198,6 +199,8 @@ export default function BillScreen() {
   const [title, setTitle] = useState('');
   /** `null` until the fronter picks a mode; the server's value wins after. */
   const [modeDraft, setModeDraft] = useState<BillSplitMode | null>(null);
+  /** The live camera sheet; on the web the picker's "camera" is a file dialog. */
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [shares, setShares] = useState<Record<string, string>>({});
   const [qtyEdits, setQtyEdits] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState({ name: '', qty: '1', price: '' });
@@ -276,9 +279,41 @@ export default function BillScreen() {
     return created.bill.id;
   }
 
-  async function capture(source: 'camera' | 'library') {
+  /** Store the receipt, then let the reader go to work on it. */
+  async function readReceipt(uri: string, file?: Blob | null, type?: string) {
     setError(null);
     setBusy('capture');
+    try {
+      const kind: 'photo' | 'video' = type === 'video' ? 'video' : 'photo';
+
+      let targetBillId = activeBillId;
+      if (!targetBillId) {
+        targetBillId = await ensureBill();
+      }
+
+      await uploadMedia.mutateAsync({
+        billId: targetBillId,
+        uri,
+        kind,
+        file: file ?? undefined,
+      });
+      await parseBill.mutateAsync({ billId: targetBillId });
+      notify({ title: 'Bill read', body: 'Kae Na checked every line. Confirm your share.' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not read the bill');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function capture(source: 'camera' | 'library') {
+    // In the browser `launchCameraAsync` is only a file input, so a desktop opens
+    // the disk dialog instead of the lens. The sheet asks getUserMedia instead.
+    if (source === 'camera' && Platform.OS === 'web') {
+      setError(null);
+      setCameraOpen(true);
+      return;
+    }
     try {
       const result =
         source === 'camera'
@@ -289,26 +324,16 @@ export default function BillScreen() {
             });
       if (result.canceled || !result.assets[0]) return;
       const asset = result.assets[0];
-      const kind: 'photo' | 'video' = asset.type === 'video' ? 'video' : 'photo';
-
-      let targetBillId = activeBillId;
-      if (!targetBillId) {
-        targetBillId = await ensureBill();
-      }
-
-      await uploadMedia.mutateAsync({
-        billId: targetBillId,
-        uri: asset.uri,
-        kind,
-        file: asset.file ?? undefined,
-      });
-      await parseBill.mutateAsync({ billId: targetBillId });
-      notify({ title: 'Bill read', body: 'Kae Na checked every line. Confirm your share.' });
+      await readReceipt(asset.uri, asset.file, asset.type ?? undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not read the bill');
-    } finally {
-      setBusy(null);
     }
+  }
+
+  /** A frame from the live browser camera, stored like any other receipt. */
+  async function keepShot(shot: CameraShot) {
+    setCameraOpen(false);
+    await readReceipt(shot.uri, shot.file);
   }
 
   function toggle(itemId: string, memberId: string) {
@@ -1363,6 +1388,12 @@ export default function BillScreen() {
           ) : null}
         </>
       ) : null}
+
+      <CameraCapture
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onShot={keepShot}
+      />
     </Screen>
   );
 }
