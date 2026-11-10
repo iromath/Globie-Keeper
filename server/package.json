@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "DATABASE_URL=\"${DATABASE_URL:-postgres://globie:globie@127.0.0.1:55432/globie_test}\" node --import tsx --test --test-concurrency=1 src/jobs/*.test.ts",
+    "test": "DATABASE_URL=\"${DATABASE_URL:-postgres://globie:globie@127.0.0.1:55432/globie_test}\" node --import tsx --test --test-concurrency=1 src/jobs/*.test.ts src/lib/*.test.ts",
     "migrate": "tsx src/db/migrate-cli.ts",
     "seed": "tsx ../db/seed.ts"
   },

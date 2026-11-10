@@ -45,11 +45,34 @@ export type ExtractionResult = {
 
 const CURRENCY = /^[A-Z]{3}$/;
 
+/**
+ * A Thai receipt prints "฿" or "บาท" far more often than "THB", and a model
+ * handed an unlabelled receipt answers USD out of habit. Name the code, the
+ * English name and the narrow symbol so the prompt itself carries the currency.
+ */
+function currencyHint(currency: string): string {
+  const code = currency.trim().toUpperCase();
+  try {
+    const symbol = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+    })
+      .formatToParts(0)
+      .find((part) => part.type === 'currency')?.value;
+    const name = new Intl.DisplayNames(['en'], { type: 'currency' }).of(code);
+    return [code, name, symbol].filter(Boolean).join(', ');
+  } catch {
+    return code;
+  }
+}
+
 const SYSTEM_PROMPT = `You read bills — receipts, invoices, order confirmations, tickets, utility statements — and return JSON only.
 Schema:
 {
   "merchant": string|null,
   "currency": "ISO-4217",
+  "currency_evidence": string|null,
   "items": [{"name": string, "qty": number, "unit_price_minor": integer, "line_total_minor": integer, "confidence": 0..1}],
   "subtotal_minor": integer,
   "tax_minor": integer,
@@ -61,6 +84,9 @@ Schema:
 }
 Rules:
 - All money is an integer in the currency's minor unit (satang, cents). Never decimals.
+- currency is the code of the currency actually printed on the document. When the document prints no currency code, symbol or word at all, use the currency named in the request.
+- currency_evidence is the exact text the document prints to name its currency — a code such as "THB", a symbol such as "฿", or a word such as "บาท". Use null when nothing is printed. Never copy the requested currency into this field.
+- Never assume USD, never convert an amount from one currency to another, and never guess a currency the document does not show.
 - qty is a positive number; if unreadable use 1.
 - confidence is your certainty for that line, 0 to 1.
 - List every printed line item. Skip headings and payment lines.
@@ -97,13 +123,21 @@ function asNumber(value: unknown, fallback = 1): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function normalizeDraft(raw: unknown, fallbackCurrency: string): ReceiptDraft | null {
+export function normalizeDraft(raw: unknown, fallbackCurrency: string): ReceiptDraft | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
 
   const rawCurrency =
     typeof source.currency === 'string' ? source.currency.trim().toUpperCase() : '';
-  const currency = CURRENCY.test(rawCurrency) ? rawCurrency : fallbackCurrency;
+  // A model that answers "USD" out of habit would relabel every amount of a
+  // bill printed in ฿, so a different code is only trusted when the model also
+  // quotes the printed text that names it.
+  const evidence =
+    typeof source.currency_evidence === 'string' ? source.currency_evidence.trim() : '';
+  const currency =
+    CURRENCY.test(rawCurrency) && (rawCurrency === fallbackCurrency || evidence.length > 0)
+      ? rawCurrency
+      : fallbackCurrency;
 
   const warnings: string[] = Array.isArray(source.warnings)
     ? source.warnings.filter((entry): entry is string => typeof entry === 'string')
@@ -282,7 +316,10 @@ async function extractFrame(framePath: string, fallbackCurrency: string): Promis
             content: [
               {
                 type: 'text',
-                text: `Read this receipt. Use ${fallbackCurrency} as the currency if none is printed.`,
+                text:
+                  `Read this receipt from a group that keeps the bill in ${currencyHint(fallbackCurrency)}. ` +
+                  `If the receipt prints no currency code, symbol or word, report "${fallbackCurrency}" and set currency_evidence to null. ` +
+                  'Never answer USD unless the receipt prints a US-dollar sign or "USD".',
               },
               { type: 'image_url', image_url: { url: dataUrl } },
             ],

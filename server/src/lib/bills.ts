@@ -461,7 +461,7 @@ export async function runExtraction(input: {
 
     if (draft.currency !== input.currency) {
       warnings.push(
-        `Receipt is printed in ${draft.currency}; this bill is kept in ${input.currency}.`,
+        `The receipt prints ${draft.currency}; this bill is kept in ${input.currency}. The amounts were not converted — check them.`,
       );
     }
 
