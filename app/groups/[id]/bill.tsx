@@ -1,3 +1,4 @@
+import { setStringAsync as copyToClipboard } from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -186,7 +187,12 @@ export default function BillScreen() {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [approveUrl, setApproveUrl] = useState<string | null>(null);
+  /**
+   * Live payment links from the last request, one per member. They are the
+   * payer's checkout, so the fronter can only pass them on — opening one here
+   * loads it in the payee's own PayPal session, which PayPal refuses.
+   */
+  const [sentLinks, setSentLinks] = useState<{ name: string; url: string }[]>([]);
   /** Set before the bill exists, then carried on the create call. */
   const [kind, setKind] = useState<BillKind>('meal');
   const [title, setTitle] = useState('');
@@ -494,14 +500,24 @@ export default function BillScreen() {
     setError(null);
     try {
       const result = await requestPayments.mutateAsync({ billId: bill.id });
-      const first = result.requests[0];
-      setApproveUrl(first?.approveUrl ?? null);
-      notify({ title: 'Requests sent', body: 'Each member can now pay from My shares.' });
-      // A PayPal.Me link is the fronter's own collect link; opening it here would
-      // just show their profile, so only an order checkout is worth a trip.
-      if (first?.approveUrl && first.paymentMode === 'payee_direct') {
-        await WebBrowser.openBrowserAsync(first.approveUrl);
-      }
+      // The response is keyed by share, so borrow the names the bill already
+      // knows to say which link belongs to whom.
+      const names = new Map(
+        (billQuery.data?.shares ?? []).map((share) => [share.id, share.memberName])
+      );
+      const links = result.requests
+        .filter((row): row is typeof row & { approveUrl: string } => Boolean(row.approveUrl))
+        .map((row) => ({ name: names.get(row.shareId) ?? 'Member', url: row.approveUrl }));
+      setSentLinks(links);
+      notify({
+        title: 'Requests sent',
+        body:
+          links.length === 1
+            ? `${links[0].name} can now pay from My shares.`
+            : links.length > 1
+              ? `${links.length} members can now pay from My shares.`
+              : 'Everyone already has a live payment link.',
+      });
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : 'PayPal requests are not configured yet'
@@ -509,6 +525,14 @@ export default function BillScreen() {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function copyPaymentLink(link: { name: string; url: string }) {
+    await copyToClipboard(link.url);
+    notify({
+      title: 'Link copied',
+      body: `Send it to ${link.name} — the checkout pays you direct.`,
+    });
   }
 
   /**
@@ -1216,7 +1240,7 @@ export default function BillScreen() {
               <SectionHeading
                 glyph={icon.paypal}
                 title="Request payment"
-                hint="Each member gets a PayPal order or a PayPal.Me link in the system browser, not an embedded webview. Both pay the fronter direct."
+                hint="Each member gets their own PayPal order or PayPal.Me link in My shares. It opens in their browser and pays you direct — never open it here, since it would load in your own PayPal session."
               />
               <Button
                 title="Send PayPal requests"
@@ -1224,16 +1248,20 @@ export default function BillScreen() {
                 onPress={runRequestPayments}
                 loading={busy === 'request'}
               />
-              {approveUrl ? (
-                <Button
-                  variant="ghost"
-                  compact
-                  icon={icon.link}
-                  title="Reopen payment link"
-                  onPress={() => WebBrowser.openBrowserAsync(approveUrl)}
-                  style={styles.inlineAction}
-                />
-              ) : null}
+              {sentLinks.map((link) => (
+                <View key={link.url} style={styles.rowBetween}>
+                  <Text variant="caption" tone="muted" numberOfLines={1} style={styles.flex}>
+                    {link.name}
+                  </Text>
+                  <Button
+                    variant="secondary"
+                    compact
+                    icon={icon.copy}
+                    title="Copy link"
+                    onPress={() => copyPaymentLink(link)}
+                  />
+                </View>
+              ))}
             </Card>
           ) : null}
 

@@ -112,7 +112,7 @@ export const MANUAL: ManualSection[] = [
       'First add your PayPal address in Settings under "Getting paid": "Save PayPal email", or a PayPal.Me handle with "Save handle".',
       'On the bill, open "Reimbursement" and tap "Request payment".',
       'Tap "Send PayPal requests" to ask every member who still owes.',
-      'If someone loses the link, tap "Reopen payment link".',
+      'If someone loses the link, tap "Send PayPal requests" again, then "Copy link" beside their name and send it to them.',
     ],
     screen: '/groups/[id]/bill',
   },
@@ -163,7 +163,7 @@ export const MANUAL: ManualSection[] = [
     steps: [
       'Open the "Donate" tab.',
       'Under "Who to adopt", pick a species.',
-      'Choose a preset gift or type an amount under "Your gift".',
+      'Choose a price per tree under "Your gift" — a preset or your own amount — then use + / − to pick how many trees; the total follows.',
       'Tap the PayPal button to pay, or tap "Redeem" to spend points you already have.',
       'Your gifts are listed under "Your giving".',
     ],
@@ -203,7 +203,7 @@ export const MANUAL: ManualSection[] = [
     steps: [
       '"Waiting on you" means your lines need checking — open the bill and tap "Confirm your share".',
       '"Waiting for … to request payment" means the fronter has not sent the request yet.',
-      'No Pay button at all: the payment link may have expired; the fronter can tap "Reopen payment link".',
+      'No Pay button at all: the payment link may have expired; ask the fronter to send the request again.',
       '"Didn\'t go through, nothing was charged" means PayPal declined — ask the fronter for a new request.',
       'A share of zero means you had no lines on the bill; ask the fronter to assign yours under "How to split".',
       'The fronter cannot request payment until a PayPal email or handle is saved in Settings under "Getting paid".',

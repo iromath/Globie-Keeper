@@ -65,8 +65,12 @@ export default function DonateScreen() {
   const selected: DonationSpecies | undefined =
     catalogue.find((entry) => entry.id === pickedId) ?? catalogue[0];
 
+  // The field is the price of one tree; the gift, the PayPal charge and the
+  // points debit are that price times the stepper, so the total follows the
+  // moment a tree is added or removed.
   const parsed = Number.parseFloat(amountText);
-  const amountMinor = Number.isFinite(parsed) ? Math.round(parsed * 100) : 0;
+  const perTreeMinor = Number.isFinite(parsed) ? Math.round(parsed * 100) : 0;
+  const amountMinor = perTreeMinor * quantity;
   const amountValid =
     !!selected && amountMinor >= minMinor && amountMinor <= maxMinor && balance >= 0;
   const amountError =
@@ -381,7 +385,7 @@ export default function DonateScreen() {
 
         <View style={styles.chips}>
           {PRESETS.map((preset) => {
-            const active = amountMinor === preset;
+            const active = perTreeMinor === preset;
             return (
               <Pressable
                 key={preset}
@@ -403,16 +407,16 @@ export default function DonateScreen() {
         </View>
 
         <Field
-          label={`Amount in ${fundCurrency}`}
+          label={`Price per tree in ${fundCurrency}`}
           value={amountText}
           onChangeText={changeAmount}
           keyboardType="decimal-pad"
           inputMode="decimal"
           placeholder="10"
           hint={
-            money.approximate(amountMinor, fundCurrency)
-              ? `${money.formatOriginal(amountMinor, fundCurrency)} ${
-                  money.approximate(amountMinor, fundCurrency) ?? ''
+            money.approximate(perTreeMinor, fundCurrency)
+              ? `${money.formatOriginal(perTreeMinor, fundCurrency)} ${
+                  money.approximate(perTreeMinor, fundCurrency) ?? ''
                 }`
               : undefined
           }
@@ -423,7 +427,12 @@ export default function DonateScreen() {
           <View style={styles.stepperCopy}>
             <Text variant="label">Trees</Text>
             <Text variant="caption" tone="dim">
-              {selected ? `You'll adopt ${quantity} × ${selected.name}` : 'Pick a tree first'}
+              {selected
+                ? `You'll adopt ${quantity} × ${selected.name} · ${money.formatOriginal(
+                    amountMinor,
+                    fundCurrency
+                  )}`
+                : 'Pick a tree first'}
             </Text>
           </View>
           <View style={styles.stepper}>
