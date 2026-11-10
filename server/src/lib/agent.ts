@@ -569,6 +569,7 @@ const createPaymentRequest: ToolHandler = async (request, args, confirmToken) =>
       payment_mode: result.paymentMode,
       amount: result.amount,
       fee_minor: result.feeMinor,
+      late_fee_minor: result.lateFeeMinor,
       gross_amount: result.grossMinor,
       currency: result.currency,
     },
@@ -578,6 +579,13 @@ const createPaymentRequest: ToolHandler = async (request, args, confirmToken) =>
         : `I sent ${share.member_name} a PayPal request for `
     }${formatAmount(result.grossMinor, result.currency)} ${result.currency}${
       result.feeMinor > 0 ? ' (includes the PayPal fee)' : ''
+    }${
+      result.lateFeeMinor > 0
+        ? ` — their share is ${formatAmount(result.amount, result.currency)} plus a ${formatAmount(
+            result.lateFeeMinor,
+            result.currency,
+          )} late fee`
+        : ''
     }${result.paymentMode === 'paypal_me' ? ' to the fronter.' : '.'}`,
   };
 };

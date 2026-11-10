@@ -76,6 +76,54 @@ export function optionalSplitMode(
   return value as BillSplitMode;
 }
 
+/**
+ * The two ways a group votes to divide a bill. `custom` and `percent` stay
+ * fronter-only choices: they cannot be won by a majority.
+ */
+export type AgreementSplitMode = 'item' | 'equal';
+
+const AGREEMENT_SPLIT_MODES: readonly AgreementSplitMode[] = ['item', 'equal'];
+
+export function optionalAgreementSplitMode(
+  source: Record<string, unknown>,
+  key = 'splitMode',
+): AgreementSplitMode | null {
+  const value = source[key];
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value !== 'string' ||
+    !AGREEMENT_SPLIT_MODES.includes(value as AgreementSplitMode)
+  ) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be one of ${AGREEMENT_SPLIT_MODES.join(', ')}`,
+    );
+  }
+  return value as AgreementSplitMode;
+}
+
+/** A rate expressed in basis points, where 300 means 3%. */
+export function optionalBps(
+  source: Record<string, unknown>,
+  key: string,
+  max = 10000,
+): number | null {
+  const value = source[key];
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > max
+  ) {
+    throw ApiError.badRequest(
+      `invalid_${key}`,
+      `${key} must be a whole number between 0 and ${max}`,
+    );
+  }
+  return value;
+}
+
 /** A percentage weight: 0 to 100, up to two decimal places. */
 export function requiredWeight(
   source: Record<string, unknown>,

@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -31,9 +31,10 @@ import {
   useRequestTip,
   useSetAllocations,
   useTips,
-  useUploadMedia
+  useUploadMedia,
+  useVoteSplitMode
 } from '@/lib/queries';
-import type { BillKind, BillSplitMode } from '@/lib/types';
+import type { AgreementSplitMode, BillKind, BillSplitMode } from '@/lib/types';
 
 type Assignment = Record<string, string[]>;
 
@@ -57,6 +58,12 @@ const SPLIT_MODES: { id: BillSplitMode; label: string }[] = [
   { id: 'equal', label: 'Even' },
   { id: 'custom', label: 'Amounts' },
   { id: 'percent', label: 'Percent' },
+];
+
+/** The two modes the whole group votes on. Amounts and percent stay the fronter's call. */
+const SPLIT_VOTES: { id: AgreementSplitMode; label: string }[] = [
+  { id: 'item', label: 'By line item' },
+  { id: 'equal', label: 'Evenly' },
 ];
 
 const SPLIT_HINTS: Record<BillSplitMode, string> = {
@@ -97,6 +104,7 @@ export default function BillScreen() {
   const addItem = useAddBillItem();
   const deleteItem = useDeleteBillItem();
   const finalizeBill = useFinalizeBill();
+  const voteSplit = useVoteSplitMode(id);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,6 +341,17 @@ export default function BillScreen() {
       setError(cause instanceof Error ? cause.message : 'Could not lock the split');
     } finally {
       setBusy(null);
+    }
+  }
+
+  /** The vote is agreement-wide, so it also decides how this bill is divided. */
+  async function onVote(splitMode: AgreementSplitMode) {
+    if (!agreement || agreement.myVote === splitMode) return;
+    setError(null);
+    try {
+      await voteSplit.mutateAsync({ agreementId: agreement.id, splitMode });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save the vote');
     }
   }
 
@@ -683,32 +702,94 @@ export default function BillScreen() {
             </Card>
           ) : null}
 
-          {bill.items.length > 0 && isFronter && !locked ? (
+          {bill.items.length > 0 ? (
             <Card>
-              <SectionHeading
-                glyph={icon.people}
-                title="How to split"
-                hint={SPLIT_HINTS[splitMode]}
-              />
-              <View style={styles.chips}>
-                {SPLIT_MODES.map((entry) => (
-                  <Button
-                    key={entry.id}
-                    compact
-                    variant={splitMode === entry.id ? 'primary' : 'secondary'}
-                    title={entry.label}
-                    accessibilityLabel={`Split: ${entry.label}`}
-                    onPress={() => setModeDraft(entry.id)}
-                  />
-                ))}
+              <View style={styles.rowBetween}>
+                <View style={styles.warnRow}>
+                  <Icon name={icon.people} size={13} color={colors.mutedDim} />
+                  <Text variant="label" tone="muted">
+                    How to divide
+                  </Text>
+                </View>
+                <Text variant="caption" tone="accent">
+                  {splitMode === 'equal'
+                    ? 'Evenly'
+                    : splitMode === 'item'
+                      ? 'By line item'
+                      : splitMode === 'custom'
+                        ? 'Amounts'
+                        : 'Percent'}
+                </Text>
               </View>
+              {/* Everyone votes, not just the fronter: the agreement is shared. */}
+              {agreement ? (
+                <>
+                  <View style={styles.segmented}>
+                    {SPLIT_VOTES.map((option) => {
+                      const leading = agreement.splitMode === option.id;
+                      return (
+                        <Pressable
+                          key={option.id}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: agreement.myVote === option.id }}
+                          disabled={locked || voteSplit.isPending}
+                          onPress={() => onVote(option.id)}
+                          style={[styles.segment, leading && styles.segmentActive]}
+                        >
+                          <Text variant="caption" tone={leading ? 'accent' : 'muted'}>
+                            {option.label} · {agreement.votes[option.id]}
+                          </Text>
+                          {agreement.myVote === option.id ? (
+                            <Icon name={icon.check} size={11} color={colors.accentText} />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text variant="caption" tone="muted">
+                    {agreement.votes.item + agreement.votes.equal} of{' '}
+                    {agreement.memberCount} members have voted. This is the
+                    agreement-wide vote, applied to every bill.
+                  </Text>
+                </>
+              ) : null}
+
+              {isFronter && !locked ? (
+                <>
+                  <Text variant="label" tone="muted">
+                    This bill
+                  </Text>
+                  <View style={styles.chips}>
+                    {SPLIT_MODES.map((entry) => (
+                      <Button
+                        key={entry.id}
+                        compact
+                        variant={splitMode === entry.id ? 'primary' : 'secondary'}
+                        title={entry.label}
+                        accessibilityLabel={`Split: ${entry.label}`}
+                        onPress={() => setModeDraft(entry.id)}
+                      />
+                    ))}
+                  </View>
+                  <Text variant="caption" tone="muted">
+                    {SPLIT_HINTS[splitMode]}
+                  </Text>
+                </>
+              ) : splitMode === 'equal' ? (
+                <Text variant="caption" tone="muted">
+                  The group chose to divide this bill equally, so there is nothing to
+                  assign. Each of the {members.length} members gets the same share when it
+                  is locked.
+                </Text>
+              ) : null}
+
               {splitMode === 'equal' ? (
                 <Text variant="caption" tone="muted">
                   {members.length} {members.length === 1 ? 'member' : 'members'} · about{' '}
                   {money.format(evenShare, currency)} each.
                 </Text>
               ) : null}
-              {splitMode === 'custom' || splitMode === 'percent' ? (
+              {isFronter && !locked && (splitMode === 'custom' || splitMode === 'percent') ? (
                 <>
                   {members.map((member) => (
                     <Field
@@ -740,7 +821,7 @@ export default function BillScreen() {
                   </Text>
                 </>
               ) : null}
-              {splitMode !== 'item' ? (
+              {isFronter && !locked && splitMode !== 'item' ? (
                 <Button
                   title="Lock the split"
                   icon={icon.lock}
@@ -1092,6 +1173,24 @@ const styles = StyleSheet.create({
   section: { gap: space.md },
   itemCard: { gap: space.sm },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  // a two-way vote reads as one control, not two buttons
+  segmented: {
+    flexDirection: 'row',
+    gap: space.xs,
+    padding: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+  },
+  segmentActive: { backgroundColor: colors.wash, borderWidth: 1, borderColor: colors.accentText },
   pair: { flexDirection: 'row', gap: space.md },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   warnRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },

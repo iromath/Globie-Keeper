@@ -91,6 +91,14 @@ export type AgreementRow = {
   fronted_by?: string | null;
   accepted_count?: number | string;
   member_count?: number | string;
+  /** The vote's current outcome, defaulting to `item` until a majority forms. */
+  split_mode?: string | null;
+  late_fee_bps?: number | string | null;
+  late_fee_cap_bps?: number | string | null;
+  votes_item?: number | string;
+  votes_equal?: number | string;
+  /** The calling member's own vote, so the UI can mark their pick. */
+  my_vote?: string | null;
 };
 
 export function mapAgreement(row: AgreementRow) {
@@ -110,6 +118,19 @@ export function mapAgreement(row: AgreementRow) {
     frontedBy: row.fronted_by ?? null,
     acceptedCount: numeric(row.accepted_count),
     memberCount: numeric(row.member_count),
+    splitMode: row.split_mode === 'equal' ? 'equal' : 'item',
+    /** Monthly rate in basis points — 300 is 3%. Zero means no late fee. */
+    lateFeeBps: numeric(row.late_fee_bps),
+    /** Hard cap as a share of the net amount, in basis points. */
+    lateFeeCapBps:
+      row.late_fee_cap_bps === null || row.late_fee_cap_bps === undefined
+        ? null
+        : numeric(row.late_fee_cap_bps),
+    votes: {
+      item: numeric(row.votes_item),
+      equal: numeric(row.votes_equal),
+    },
+    myVote: row.my_vote === 'item' || row.my_vote === 'equal' ? row.my_vote : null,
   };
 }
 
@@ -243,6 +264,8 @@ export type ShareRow = {
   /** Snapshot of optional fee coverage (DEV_PLAN §2.20); the net stays `amount`. */
   fee_minor?: number;
   gross_minor?: number | null;
+  /** Late fee charged on this share when it was requested, on top of `amount`. */
+  late_fee_minor?: number;
   /** Who fronted the bill — the member who has to request the payment. */
   fronter_name?: string | null;
 };
@@ -282,6 +305,8 @@ export function mapShare(row: ShareRow, canFinish = false) {
      */
     feeMinor: row.fee_minor ?? 0,
     grossMinor: row.gross_minor ?? null,
+    /** Charged on top of the share once it is overdue; snapshot, not a quote. */
+    lateFeeMinor: row.late_fee_minor ?? 0,
     /** Lets the member see whose move it is while a share is still `proposed`. */
     fronterName: row.fronter_name?.trim() ?? null,
   };

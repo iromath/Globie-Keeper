@@ -6,7 +6,6 @@ import { config } from '../lib/config.js';
 import { ApiError } from '../lib/http-error.js';
 import { createInviteCode } from '../lib/ids.js';
 import { recordEvent } from '../lib/ledger.js';
-import { consume } from '../lib/throttle.js';
 import {
     mapAgreement,
     mapBill,
@@ -20,6 +19,7 @@ import {
     type GroupRow,
     type MemberRow,
 } from '../lib/serialize.js';
+import { consume } from '../lib/throttle.js';
 import {
     asRecord,
     currencyCode,
@@ -71,19 +71,27 @@ async function loadMembers(groupId: string): Promise<MemberListRow[]> {
 
 async function loadLatestAgreement(
   groupId: string,
+  memberId: string,
 ): Promise<AgreementRow | null> {
   const { rows } = await query<AgreementRow>(
     `select a.id, a.group_id, a.currency, a.estimated_total, a.deadline,
             a.status, a.created_by, a.fronted_by,
+            a.split_mode, a.late_fee_bps, a.late_fee_cap_bps,
             (select count(*) from agreement_acceptances aa
               where aa.agreement_id = a.id) as accepted_count,
             (select count(*) from members m
-              where m.group_id = a.group_id and m.status <> 'removed') as member_count
+              where m.group_id = a.group_id and m.status <> 'removed') as member_count,
+            (select count(*) from agreement_votes v
+              where v.agreement_id = a.id and v.split_mode = 'item') as votes_item,
+            (select count(*) from agreement_votes v
+              where v.agreement_id = a.id and v.split_mode = 'equal') as votes_equal,
+            (select v.split_mode from agreement_votes v
+              where v.agreement_id = a.id and v.member_id = $2) as my_vote
        from agreements a
       where a.group_id = $1
       order by a.created_at desc
       limit 1`,
-    [groupId],
+    [groupId, memberId],
   );
   return rows[0] ?? null;
 }
@@ -302,7 +310,7 @@ export const groupRoutes: FastifyPluginAsync = async (app) => {
 
     const [members, agreementRow, billRow] = await Promise.all([
       loadMembers(groupId),
-      loadLatestAgreement(groupId),
+      loadLatestAgreement(groupId, member.id),
       loadLatestBill(groupId),
     ]);
 

@@ -174,7 +174,14 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
       body.currency === undefined ? ctx.currency : currencyCode(body.currency);
     const title = optionalString(body, 'title', 120);
     const kind = optionalBillKind(body) ?? 'other';
-    const splitMode = optionalSplitMode(body) ?? 'item';
+    // Absent a fronter override, the bill starts on the agreement-wide vote, so
+    // the group's choice is what everyone sees from the first line.
+    const { rows: agreementRows } = await query<{ split_mode: string }>(
+      `select split_mode from agreements where id = $1`,
+      [agreementId],
+    );
+    const agreedMode = agreementRows[0]?.split_mode === 'equal' ? 'equal' : 'item';
+    const splitMode = optionalSplitMode(body) ?? agreedMode;
 
     const { rows } = await query<BillRow>(
       `insert into bills (agreement_id, currency, status, title, kind, split_mode)

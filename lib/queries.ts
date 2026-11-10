@@ -7,6 +7,7 @@ import type {
     AgentResponse,
     AgentToolName,
     Agreement,
+    AgreementSplitMode,
     Allocation,
     Bill,
     BillKind,
@@ -44,6 +45,8 @@ export const queryKeys = {
   group: (groupId: string) => ['group', groupId] as const,
   timeline: (groupId: string) => ['timeline', groupId] as const,
   bill: (billId: string) => ['bill', billId] as const,
+  /** Prefix of every bill query — a vote can rewrite an editable bill's mode. */
+  bills: ['bill'] as const,
   leaderboard: (groupId: string) => ['leaderboard', groupId] as const,
   tips: (billId: string) => ['tips', billId] as const,
   fxRates: ['fx', 'rates'] as const,
@@ -389,11 +392,32 @@ export function useCreateAgreement(groupId: string) {
       estimatedTotalMinor: number;
       deadline: string | null;
       frontedByMemberId: string;
+      /** Monthly late fee in basis points; omit or 0 for no late fee. */
+      lateFeeBps?: number;
+      /** Cap as a share of the share, in basis points. */
+      lateFeeCapBps?: number | null;
+      splitMode?: AgreementSplitMode;
     }) =>
       request<{ agreement: Agreement }>('/agreements', {
         body: { groupId, ...input },
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.group(groupId) }),
+  });
+}
+
+/** One vote per member on how to divide; the majority becomes the default. */
+export function useVoteSplitMode(groupId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { agreementId: string; splitMode: AgreementSplitMode }) =>
+      request<{ agreement: Agreement }>(`/agreements/${input.agreementId}/vote`, {
+        body: { splitMode: input.splitMode },
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.group(groupId) });
+      client.invalidateQueries({ queryKey: queryKeys.timeline(groupId) });
+      client.invalidateQueries({ queryKey: queryKeys.bills });
+    },
   });
 }
 

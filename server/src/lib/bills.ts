@@ -98,7 +98,7 @@ export async function loadShares(billId: string): Promise<ShareRow[]> {
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
             s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at,
-            s.fee_minor, s.gross_minor
+            s.fee_minor, s.gross_minor, s.late_fee_minor
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -118,7 +118,7 @@ export async function loadShareById(shareId: string): Promise<ShareRow> {
             s.member_id, u.display_name as member_name,
             s.amount, s.currency, s.status, s.due_at, s.paid_at,
             s.paypal_order_id, s.paypal_approve_url, s.payment_mode, s.created_at,
-            s.fee_minor, s.gross_minor
+            s.fee_minor, s.gross_minor, s.late_fee_minor
        from shares s
        join bills b on b.id = s.bill_id
        join agreements a on a.id = b.agreement_id
@@ -619,6 +619,36 @@ export function p2pRef(shareId: string): string {
   return `p2p:${shareId}`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What an overdue share owes on top of itself, in minor units.
+ *
+ * `lateFeeBps` is a monthly rate (300 = 3% a month), prorated by the day from
+ * the share's due date, then capped as a share of the share when the agreement
+ * set a cap. Zero rate or no due date means nobody can be charged extra.
+ */
+export function lateFeeFor(input: {
+  amountMinor: number;
+  lateFeeBps: number;
+  lateFeeCapBps: number | null;
+  dueAt: Date | null;
+  now?: Date;
+}): number {
+  const { amountMinor, lateFeeBps, lateFeeCapBps, dueAt } = input;
+  if (lateFeeBps <= 0 || !dueAt || amountMinor <= 0) return 0;
+  const now = input.now ?? new Date();
+  const overdueDays = (now.getTime() - dueAt.getTime()) / DAY_MS;
+  if (overdueDays <= 0) return 0;
+
+  // A 30-day month, prorated, rounded up so a member is never undercharged by
+  // a fraction of a satang.
+  const raw = Math.ceil((amountMinor * lateFeeBps * overdueDays) / (10_000 * 30));
+  const cap =
+    lateFeeCapBps === null ? raw : Math.floor((amountMinor * lateFeeCapBps) / 10_000);
+  return Math.max(0, Math.min(raw, cap));
+}
+
 /**
  * Ask one member for one share, using whichever mode the fronter picked.
  *
@@ -642,6 +672,7 @@ export async function requestPaymentForShare(input: {
   paymentMode: PaymentMode;
   amount: number;
   feeMinor: number;
+  lateFeeMinor: number;
   grossMinor: number;
   currency: string;
 }> {
@@ -655,9 +686,11 @@ export async function requestPaymentForShare(input: {
     cover_paypal_fee: boolean;
     payee_user_paypal_email: string | null;
     payer_paypal_email: string | null;
+    late_fee_bps: number;
+    late_fee_cap_bps: number | null;
   }>(
     `select m.paypal_email, m.paypal_merchant_id, m.paypal_mode, m.paypal_me_handle,
-            m.cover_paypal_fee,
+            m.cover_paypal_fee, a.late_fee_bps, a.late_fee_cap_bps,
             (select u.paypal_email
                from users u
               where u.id = m.user_id) as payee_user_paypal_email,
@@ -687,6 +720,27 @@ export async function requestPaymentForShare(input: {
   const payerEmail = payeeRows[0]?.payer_paypal_email?.trim().toLowerCase() ?? null;
 
   /**
+   * Late fee (agreement terms): charged on top of an overdue share, prorated by
+   * the day and capped as a share of it. Once quoted on a request it becomes a
+   * snapshot — a later change to the terms cannot rewrite what this member was
+   * already asked to pay.
+   */
+  const lateFee =
+    (share.late_fee_minor ?? 0) > 0
+      ? (share.late_fee_minor ?? 0)
+      : lateFeeFor({
+          amountMinor: share.amount,
+          lateFeeBps: Number(payeeRows[0]?.late_fee_bps ?? 0),
+          lateFeeCapBps:
+            payeeRows[0]?.late_fee_cap_bps === null ||
+            payeeRows[0]?.late_fee_cap_bps === undefined
+              ? null
+              : Number(payeeRows[0].late_fee_cap_bps),
+          dueAt: share.due_at,
+        });
+  const owed = share.amount + lateFee;
+
+  /**
    * Optional fee coverage (DEV_PLAN §2.20). The payer is asked for `gross` so
    * the fronter nets the share. Off unless the fronter opted in, and never in
    * live mode without PAYPAL_FEE_COVER_LIVE_ALLOWED: passing the fee on is a
@@ -694,9 +748,9 @@ export async function requestPaymentForShare(input: {
    */
   const coverFee = Boolean(payeeRows[0]?.cover_paypal_fee) && feeCoverAllowed();
   const fee = coverFee
-    ? grossUpMinor(share.amount, feeScheduleFor(input.currency)) - share.amount
+    ? grossUpMinor(owed, feeScheduleFor(input.currency)) - owed
     : 0;
-  const gross = share.amount + fee;
+  const gross = owed + fee;
 
   if (['paid', 'settled', 'refunded'].includes(share.status)) {
     throw ApiError.conflict(
@@ -714,6 +768,7 @@ export async function requestPaymentForShare(input: {
       paymentMode: (share.payment_mode as PaymentMode | null) ?? payeeMode,
       amount: share.amount,
       feeMinor: share.fee_minor ?? 0,
+      lateFeeMinor: share.late_fee_minor ?? 0,
       grossMinor: share.gross_minor ?? share.amount,
       currency: input.currency,
     };
@@ -738,9 +793,10 @@ export async function requestPaymentForShare(input: {
                 paypal_approve_url = $2,
                 payment_mode = 'paypal_me',
                 fee_minor = $3,
-                gross_minor = $4
+                gross_minor = $4,
+                late_fee_minor = $5
           where id = $1 and status in ('proposed', 'failed', 'requested')`,
-        [share.id, link, fee, gross],
+        [share.id, link, fee, gross, lateFee],
       );
       await tx.query(
         `insert into payments
@@ -756,10 +812,10 @@ export async function requestPaymentForShare(input: {
         [
           share.id,
           providerRef,
-          share.amount,
+          owed,
           input.currency,
           fee,
-          JSON.stringify({ paypalMeUrl: link, handle: payeeHandle }),
+          JSON.stringify({ paypalMeUrl: link, handle: payeeHandle, lateFeeMinor: lateFee }),
         ],
       );
       await recordEvent(tx, {
@@ -782,6 +838,7 @@ export async function requestPaymentForShare(input: {
       paymentMode: 'paypal_me',
       amount: share.amount,
       feeMinor: fee,
+      lateFeeMinor: lateFee,
       grossMinor: gross,
       currency: input.currency,
     };
@@ -832,9 +889,10 @@ export async function requestPaymentForShare(input: {
               paypal_approve_url = $3,
               payment_mode = 'payee_direct',
               fee_minor = $4,
-              gross_minor = $5
+              gross_minor = $5,
+              late_fee_minor = $6
         where id = $1 and status in ('proposed', 'failed', 'requested')`,
-      [share.id, order.id, order.approveUrl, fee, gross],
+      [share.id, order.id, order.approveUrl, fee, gross, lateFee],
     );
     await tx.query(
       `insert into payments
@@ -850,10 +908,10 @@ export async function requestPaymentForShare(input: {
       [
         share.id,
         order.id,
-        share.amount,
+        owed,
         input.currency,
         fee,
-        JSON.stringify({ orderId: order.id }),
+        JSON.stringify({ orderId: order.id, lateFeeMinor: lateFee }),
       ],
     );
     await recordEvent(tx, {
@@ -876,6 +934,7 @@ export async function requestPaymentForShare(input: {
     paymentMode: 'payee_direct',
     amount: share.amount,
     feeMinor: fee,
+    lateFeeMinor: lateFee,
     grossMinor: gross,
     currency: input.currency,
   };

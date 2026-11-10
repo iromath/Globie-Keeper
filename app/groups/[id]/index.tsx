@@ -23,8 +23,9 @@ import {
   useCreateAgreement,
   useGroup,
   useGroupTimeline,
+  useVoteSplitMode,
 } from '@/lib/queries';
-import type { Agreement } from '@/lib/types';
+import type { Agreement, AgreementSplitMode } from '@/lib/types';
 
 const statusCopy: Record<Agreement['status'], string> = {
   draft: 'Draft',
@@ -34,6 +35,14 @@ const statusCopy: Record<Agreement['status'], string> = {
   settled: 'Settled',
 };
 
+const SPLIT_VOTES: { id: AgreementSplitMode; label: string }[] = [
+  { id: 'item', label: 'By line item' },
+  { id: 'equal', label: 'Evenly' },
+];
+
+/** 300 bps reads as 3% — terms are signed in percents, not basis points. */
+const asPercent = (bps: number) => String(Number((bps / 100).toFixed(2)));
+
 export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const notify = useMascotToast();
@@ -42,9 +51,15 @@ export default function GroupScreen() {
   const timeline = useGroupTimeline(id);
   const createAgreement = useCreateAgreement(id);
   const acceptAgreement = useAcceptAgreement(id);
+  const voteSplit = useVoteSplitMode(id);
 
   const [estimate, setEstimate] = useState('');
   const [deadlineDays, setDeadlineDays] = useState('3');
+  /** `none` means nobody can be charged extra; `monthly` needs a rate to sign. */
+  const [lateFeeKind, setLateFeeKind] = useState<'none' | 'monthly'>('none');
+  const [lateFeeRate, setLateFeeRate] = useState('3');
+  const [lateFeeCap, setLateFeeCap] = useState('5');
+  const [formError, setFormError] = useState<string | null>(null);
   // Who actually paid the merchant. Creating the agreement does not answer it.
   const [frontedBy, setFrontedBy] = useState<string | null>(null);
 
@@ -93,11 +108,32 @@ export default function GroupScreen() {
   async function onCreateAgreement() {
     const estimatedTotalMinor = toMinor(estimate || '0');
     if (!Number.isFinite(estimatedTotalMinor)) return;
+    let lateFeeBps = 0;
+    let lateFeeCapBps: number | null = null;
+    if (lateFeeKind === 'monthly') {
+      const rate = Number(lateFeeRate);
+      if (!Number.isFinite(rate) || rate <= 0) {
+        setFormError('Give the monthly fee a rate, or choose no late fee.');
+        return;
+      }
+      lateFeeBps = Math.round(rate * 100);
+      if (lateFeeCap.trim()) {
+        const cap = Number(lateFeeCap);
+        if (!Number.isFinite(cap) || cap <= 0) {
+          setFormError('The cap is a percentage of the share, or leave it empty.');
+          return;
+        }
+        lateFeeCapBps = Math.round(cap * 100);
+      }
+    }
+    setFormError(null);
     const days = Number(deadlineDays) || 3;
     await createAgreement.mutateAsync({
       estimatedTotalMinor,
       deadline: new Date(Date.now() + days * 86_400_000).toISOString(),
       frontedByMemberId: frontedBy ?? me.id,
+      lateFeeBps,
+      lateFeeCapBps,
     });
     setEstimate('');
     notify({
@@ -109,6 +145,18 @@ export default function GroupScreen() {
   async function onAcceptAgreement(agreementId: string) {
     await acceptAgreement.mutateAsync(agreementId);
     notify({ title: 'You agreed', body: 'Kae Na has your tap on record.' });
+  }
+
+  async function onVote(splitMode: AgreementSplitMode) {
+    if (!agreement || agreement.myVote === splitMode) return;
+    try {
+      await voteSplit.mutateAsync({ agreementId: agreement.id, splitMode });
+    } catch (cause) {
+      notify({
+        title: 'Vote not saved',
+        body: cause instanceof Error ? cause.message : 'Try again in a moment.',
+      });
+    }
   }
 
   const billAction = bill
@@ -201,6 +249,63 @@ export default function GroupScreen() {
             keyboardType="number-pad"
             error={createAgreement.error?.message}
           />
+          <Text variant="label" tone="muted">
+            If someone is late
+          </Text>
+          <View style={styles.segmented}>
+            {(
+              [
+                { id: 'none', label: 'No late fee' },
+                { id: 'monthly', label: 'Monthly fee' },
+              ] as const
+            ).map((option) => {
+              const selected = lateFeeKind === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => {
+                    setLateFeeKind(option.id);
+                    setFormError(null);
+                  }}
+                  style={[styles.segment, selected && styles.segmentActive]}
+                >
+                  <Text variant="caption" tone={selected ? 'accent' : 'muted'}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {lateFeeKind === 'monthly' ? (
+            <>
+              <Field
+                label="Late fee (% per month)"
+                value={lateFeeRate}
+                onChangeText={setLateFeeRate}
+                keyboardType="decimal-pad"
+                placeholder="3"
+                error={formError ?? undefined}
+              />
+              <Field
+                label="Cap (% of the share, optional)"
+                value={lateFeeCap}
+                onChangeText={setLateFeeCap}
+                keyboardType="decimal-pad"
+                placeholder="5"
+              />
+              <Text variant="caption" tone="muted">
+                Charged on top of the share, only after the due date, and only by the
+                person who fronted. Everyone signs these exact terms.
+              </Text>
+            </>
+          ) : (
+            <Text variant="caption" tone="muted">
+              Nobody can be charged extra for paying late. This is part of the terms
+              everyone signs.
+            </Text>
+          )}
           <Button
             title="Create agreement"
             icon={icon.check}
@@ -243,6 +348,54 @@ export default function GroupScreen() {
               {isFronter ? ' (you)' : ''}
             </Text>
           ) : null}
+          <Text variant="caption" tone="muted">
+            {agreement.lateFeeBps > 0
+              ? `Late fee ${asPercent(agreement.lateFeeBps)}% per month${
+                  agreement.lateFeeCapBps !== null
+                    ? `, capped at ${asPercent(agreement.lateFeeCapBps)}% of the share`
+                    : ''
+                }`
+              : 'No late fee'}
+          </Text>
+          {/* The vote is agreement-wide, not per bill: whatever leads here is the
+              mode a new bill starts in, and everyone sees the same tally. */}
+          <View style={styles.rowBetween}>
+            <View style={styles.inline}>
+              <Icon name={icon.people} size={13} color={colors.mutedDim} />
+              <Text variant="label" tone="muted">
+                How to divide
+              </Text>
+            </View>
+            <Text variant="caption" tone="accent">
+              {agreement.splitMode === 'equal' ? 'Evenly' : 'By line item'}
+            </Text>
+          </View>
+          <View style={styles.segmented}>
+            {SPLIT_VOTES.map((option) => {
+              const leading = agreement.splitMode === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: agreement.myVote === option.id }}
+                  disabled={voteSplit.isPending}
+                  onPress={() => onVote(option.id)}
+                  style={[styles.segment, leading && styles.segmentActive]}
+                >
+                  <Text variant="caption" tone={leading ? 'accent' : 'muted'}>
+                    {option.label} · {agreement.votes[option.id]}
+                  </Text>
+                  {agreement.myVote === option.id ? (
+                    <Icon name={icon.check} size={11} color={colors.accentText} />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text variant="caption" tone="muted">
+            {agreement.votes.item + agreement.votes.equal} of {agreement.memberCount}{' '}
+            members have voted. This is the agreement-wide vote, applied to every bill.
+          </Text>
           {/* The figure above is only what everyone agreed to before the receipt.
               When the receipt lands higher, say so here, next to that number. */}
           {bill &&
@@ -370,6 +523,25 @@ const styles = StyleSheet.create({
   badgeAgreed: { borderColor: colors.accentText },
   actions: { gap: space.sm },
   waiting: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  inline: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  // a two-way vote reads as one control, not two buttons
+  segmented: {
+    flexDirection: 'row',
+    gap: space.xs,
+    padding: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+  },
+  segmentActive: { backgroundColor: colors.wash, borderWidth: 1, borderColor: colors.accentText },
   section: { gap: space.md },
   linkRow: { alignItems: 'center' },
 });

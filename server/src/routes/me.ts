@@ -297,7 +297,7 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
               s.member_id, u.display_name as member_name, s.amount, s.currency,
               s.status, s.due_at, s.paid_at, s.created_at,
               s.paypal_order_id, s.paypal_approve_url, s.payment_mode,
-              s.fee_minor, s.gross_minor,
+              s.fee_minor, s.gross_minor, s.late_fee_minor,
               fu.display_name as fronter_name
          from shares s
          join bills b on b.id = s.bill_id
@@ -323,7 +323,12 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
         return mapShare({ ...row, status: state.status }, state.canFinish);
       }),
     );
-    const outstandingMinor = shares.reduce((sum, share) => sum + share.amountMinor, 0);
+    // What the member still owes, late fee included: the fee is charged when
+    // the fronter asks for the money, so it is part of the outstanding balance.
+    const outstandingMinor = shares.reduce(
+      (sum, share) => sum + share.amountMinor + share.lateFeeMinor,
+      0,
+    );
     const currency = shares.length > 0 ? shares[0]!.currency : await fallbackCurrency(auth.userId);
 
     return { shares, outstandingMinor, currency };

@@ -25,6 +25,9 @@ export type Member = {
   status: 'invited' | 'active' | 'removed';
 };
 
+/** The two ways an agreement can be divided — the only options the group votes on. */
+export type AgreementSplitMode = 'item' | 'equal';
+
 export type Agreement = {
   id: string;
   groupId: string;
@@ -36,6 +39,15 @@ export type Agreement = {
   frontedBy: string | null;
   acceptedCount: number;
   memberCount: number;
+  /** The vote's current outcome, and the default for every bill it produces. */
+  splitMode: AgreementSplitMode;
+  /** Monthly late fee in basis points — 300 is 3% a month. Zero means none. */
+  lateFeeBps: number;
+  /** Hard cap on the late fee as a share of the share, in basis points. */
+  lateFeeCapBps: number | null;
+  votes: { item: number; equal: number };
+  /** The caller's own vote, so the screen can mark their pick. */
+  myVote: AgreementSplitMode | null;
 };
 
 export type BillItem = {
@@ -135,6 +147,8 @@ export type Share = {
    */
   feeMinor?: number;
   grossMinor?: number | null;
+  /** Charged on top of the share when it is overdue; a snapshot of the request. */
+  lateFeeMinor?: number;
   /** PayPal holds an approval we can still capture; only on a `requested` share. */
   canFinish?: boolean;
 };
