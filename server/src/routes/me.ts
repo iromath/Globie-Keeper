@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 
 import { query } from '../db/pool.js';
+import { reissueDeadCheckout } from '../lib/bills.js';
 import { feeCoverAllowed } from '../lib/fees.js';
 import { ApiError } from '../lib/http-error.js';
 import { channelEnabled, FALLBACK_ORDER, type Channel } from '../lib/notify.js';
@@ -320,6 +321,29 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
     const shares = await Promise.all(
       rows.map(async (row) => {
         const state = await reconcileShare(row);
+        if (state.status === 'failed') {
+          // The checkout died under the member. Mint a replacement instead of
+          // handing back a balance with no way to pay it; when no order can be
+          // made the row stays `failed` and the list says so, as it always has.
+          const fresh = await reissueDeadCheckout({
+            share: row,
+            actor: { memberId: row.member_id, displayName: 'Globie Keeper' },
+          });
+          if (fresh) {
+            return mapShare(
+              {
+                ...row,
+                status: fresh.status,
+                paypal_approve_url: fresh.approveUrl,
+                payment_mode: fresh.paymentMode,
+                fee_minor: fresh.feeMinor,
+                gross_minor: fresh.grossMinor,
+                late_fee_minor: fresh.lateFeeMinor,
+              },
+              false,
+            );
+          }
+        }
         return mapShare(
           {
             ...row,

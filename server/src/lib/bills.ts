@@ -939,3 +939,69 @@ export async function requestPaymentForShare(input: {
     currency: input.currency,
   };
 }
+
+/**
+ * Replace a checkout PayPal dropped — expired, voided, or refused at its own
+ * page — instead of leaving the share with a balance and no way to pay it.
+ * `reconcileShare` marks the row `failed`; this mints the order behind its
+ * replacement and returns the link the member can press.
+ *
+ * Returns null when no order can be made (PayPal not configured, the fronter has
+ * no address, the payer is the payee): the caller then leaves the row `failed`,
+ * exactly as it behaved before, rather than failing the request that rendered
+ * the list.
+ */
+export async function reissueDeadCheckout(input: {
+  share: ShareRow;
+  actor: { memberId: string; displayName: string };
+}): Promise<{
+  status: 'requested';
+  approveUrl: string;
+  paymentMode: PaymentMode;
+  feeMinor: number;
+  lateFeeMinor: number;
+  grossMinor: number;
+} | null> {
+  const { rows } = await query<{
+    merchant: string | null;
+    currency: string;
+    agreement_id: string;
+    group_id: string;
+  }>(
+    `select b.merchant, b.currency, b.agreement_id, a.group_id
+       from bills b
+       join agreements a on a.id = b.agreement_id
+      where b.id = $1`,
+    [input.share.bill_id],
+  );
+  const bill = rows[0];
+  if (!bill) return null;
+
+  try {
+    const result = await requestPaymentForShare({
+      // The row the caller holds was read before the death was recorded, so it
+      // may still carry the dead link; hand over the state the database holds
+      // now so the live-checkout shortcut cannot hand that link back.
+      share: { ...input.share, status: 'failed', paypal_approve_url: null },
+      merchant: bill.merchant,
+      currency: bill.currency.trim(),
+      groupId: bill.group_id,
+      agreementId: bill.agreement_id,
+      actor: input.actor,
+    });
+    if (!result.approveUrl) return null;
+    // Hand back the amounts the new order was created with: a share that is
+    // overdue now may carry a late fee it did not have when it last failed.
+    return {
+      status: 'requested',
+      approveUrl: result.approveUrl,
+      paymentMode: result.paymentMode,
+      feeMinor: result.feeMinor,
+      lateFeeMinor: result.lateFeeMinor,
+      grossMinor: result.grossMinor,
+    };
+  } catch (cause) {
+    if (cause instanceof ApiError) return null;
+    throw cause;
+  }
+}

@@ -412,14 +412,14 @@ export async function failShare(input: {
 }
 
 /**
- * How long an unapproved PayPal checkout may sit before it counts as dead. The
- * browser is the only place a checkout can be approved, so a share that is
- * still unapproved this long after its order was opened was abandoned or
- * refused; waiting longer just leaves the row saying "Payment requested".
+ * How long an unapproved PayPal checkout may sit before it counts as dead.
+ * PayPal itself expires an unapproved order three hours after it is created, so
+ * that is the longest a link can ever work — a shorter guess only retires links
+ * a member could still have paid. Past this the order is dead by both clocks.
  * The clock is the order's own `create_time`, not the share's — a share is
  * written at finalize, long before the fronter requests payment.
  */
-const CHECKOUT_TTL_MS = 5 * 60 * 1000;
+const CHECKOUT_TTL_MS = 3 * 60 * 60 * 1000;
 
 /**
  * A checkout PayPal refuses at its own page never comes back to us: PayPal

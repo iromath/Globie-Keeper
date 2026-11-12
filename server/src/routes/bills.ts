@@ -18,6 +18,7 @@ import {
     loadBill,
     loadShares,
     mediaPath,
+    reissueDeadCheckout,
     requestPaymentForShare,
     startBillParse,
 } from '../lib/bills.js';
@@ -342,16 +343,41 @@ export const billRoutes: FastifyPluginAsync = async (app) => {
     ]);
 
     // A checkout PayPal refused never returns to us, so a `requested` share can
-    // be dead. Re-read only the caller's own order before rendering it.
+    // be dead. Re-read only the caller's own order before rendering it, and
+    // replace a dead one so the bill screen keeps a Pay button that works.
     const mine = shares.find((share) => share.member_id === ctx.member.id);
     const reconciled = mine ? await reconcileShare(mine) : null;
+    const reissued =
+      mine && reconciled?.status === 'failed'
+        ? await reissueDeadCheckout({
+            share: mine,
+            actor: { memberId: ctx.member.id, displayName: 'Globie Keeper' },
+          })
+        : null;
 
     return {
       bill: mapBill(bill.bill, bill.items, bill.splitEntries),
       allocations: allocations.map(mapAllocation),
       shares: shares.map((share) =>
         share === mine && reconciled
-          ? mapShare({ ...share, status: reconciled.status }, reconciled.canFinish)
+          ? mapShare(
+              {
+                ...share,
+                status: reissued?.status ?? reconciled.status,
+                paypal_approve_url:
+                  reissued?.approveUrl ??
+                  (reconciled.status === 'failed' ? null : share.paypal_approve_url),
+                ...(reissued
+                  ? {
+                      payment_mode: reissued.paymentMode,
+                      fee_minor: reissued.feeMinor,
+                      gross_minor: reissued.grossMinor,
+                      late_fee_minor: reissued.lateFeeMinor,
+                    }
+                  : {}),
+              },
+              reconciled.canFinish,
+            )
           : mapShare(share),
       ),
     };
