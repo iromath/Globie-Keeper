@@ -320,7 +320,16 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
     const shares = await Promise.all(
       rows.map(async (row) => {
         const state = await reconcileShare(row);
-        return mapShare({ ...row, status: state.status }, state.canFinish);
+        return mapShare(
+          {
+            ...row,
+            status: state.status,
+            // A checkout that ended without a payment leaves no usable link, and
+            // this row was read before reconcileShare could clear it.
+            paypal_approve_url: state.status === 'failed' ? null : row.paypal_approve_url,
+          },
+          state.canFinish,
+        );
       }),
     );
     // What the member still owes, late fee included: the fee is charged when
