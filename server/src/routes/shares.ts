@@ -12,7 +12,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { requireShareMember } from '../lib/access.js';
 import { p2pRef } from '../lib/bills.js';
 import { ApiError } from '../lib/http-error.js';
-import { captureOrder, isPayPalConfigured, readOrder } from '../lib/paypal.js';
+import { captureOrder, isOrderMissing, isPayPalConfigured, readOrder } from '../lib/paypal.js';
 import { failShare, settleShare } from '../lib/settlement.js';
 import { pathUuid } from '../lib/validate.js';
 
@@ -59,8 +59,16 @@ export const shareRoutes: FastifyPluginAsync = async (app) => {
       // the share would sit on "Payment requested" until the TTL expires. The
       // payer is here, right after the browser closed, so an order that is still
       // unapproved now is a dead checkout, not a slow one.
-      const order = await readOrder(ctx.paypalOrderId).catch(() => null);
-      if (order && order.status !== 'APPROVED' && order.status !== 'COMPLETED') {
+      let order: Awaited<ReturnType<typeof readOrder>> | null = null;
+      try {
+        order = await readOrder(ctx.paypalOrderId);
+      } catch (readCause) {
+        // PayPal dropped the order (expired checkout) — that is a dead checkout
+        // too. A read that fails for any other reason says nothing about the
+        // order, so keep the original capture error.
+        if (!isOrderMissing(readCause)) throw cause;
+      }
+      if (!order || (order.status !== 'APPROVED' && order.status !== 'COMPLETED')) {
         await failShare({
           shareId,
           actor: ctx.member.displayName,

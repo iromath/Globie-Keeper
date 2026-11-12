@@ -10,7 +10,7 @@ import { withTransaction } from '../db/pool.js';
 import { extractSettledRate, type SettledRate } from './fx.js';
 import { ApiError } from './http-error.js';
 import { recordEvent } from './ledger.js';
-import { isPayPalConfigured, readOrder } from './paypal.js';
+import { isOrderMissing, isPayPalConfigured, readOrder } from './paypal.js';
 
 /** First reimburser in an agreement earns the most (DEV_PLAN §2.12). */
 const GLOBIE_BY_RANK = [10, 5, 3];
@@ -442,8 +442,21 @@ export async function reconcileShare(share: {
     return { status: share.status, canFinish: false };
   }
 
-  const order = await readOrder(share.paypal_order_id).catch(() => null);
-  if (!order) return { status: share.status, canFinish: false };
+  let order: Awaited<ReturnType<typeof readOrder>>;
+  try {
+    order = await readOrder(share.paypal_order_id);
+  } catch (cause) {
+    // PayPal expired the checkout and dropped the order. Nothing can approve it
+    // any more, so retire the row instead of handing the member a "Pay" button
+    // that opens PayPal's error page. Anything else may be transient.
+    if (!isOrderMissing(cause)) return { status: share.status, canFinish: false };
+    await failShare({
+      shareId: share.id,
+      actor: 'PayPal',
+      reason: 'The PayPal checkout expired — the fronter can request it again',
+    });
+    return { status: 'failed', canFinish: false };
+  }
 
   if (order.status === 'APPROVED' || order.status === 'COMPLETED') {
     return { status: share.status, canFinish: true };

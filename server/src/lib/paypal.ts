@@ -316,6 +316,17 @@ async function getOrder(orderId: string): Promise<CaptureResponse> {
     },
   );
 
+  // PayPal forgets a sandbox checkout when it expires, so a stored order id can
+  // stop existing while the share row still points at it. That is a dead
+  // checkout, not a PayPal outage: callers must be able to tell them apart.
+  if (response.status === 404 || response.status === 410) {
+    throw new ApiError(
+      404,
+      'paypal_order_missing',
+      'PayPal no longer has this order — the checkout expired',
+    );
+  }
+
   if (!response.ok) {
     throw new ApiError(
       502,
@@ -325,6 +336,11 @@ async function getOrder(orderId: string): Promise<CaptureResponse> {
   }
 
   return (await response.json()) as CaptureResponse;
+}
+
+/** True when PayPal has no record of the order, i.e. the checkout is dead. */
+export function isOrderMissing(cause: unknown): boolean {
+  return cause instanceof ApiError && cause.code === 'paypal_order_missing';
 }
 
 /**
